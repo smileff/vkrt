@@ -18,6 +18,10 @@
 #include "vulkan/vulkan.h"
 #include "vulkan/vk_enum_string_helper.h"
 
+#include "imgui.h"
+#include "imgui_impl_sdl2.h"
+#include "imgui_impl_vulkan.h"
+
 static const VkAllocationCallbacks* g_vkAllocator = nullptr;
 
 VkResult g_vkResult = VK_RESULT_MAX_ENUM;
@@ -33,6 +37,38 @@ VkResult g_vkResult = VK_RESULT_MAX_ENUM;
 
 #define VKFail(code) (g_vkResult = (code), g_vkResult != VK_SUCCESS)
 
+// Some context structures?
+
+struct ApplicationContext
+{
+	int WinWidth, WinHeight;
+	SDL_Window* Window;
+};
+
+struct VulkanContext
+{
+	VkInstance Instance;
+	VkPhysicalDevice PhysicalDevice;
+	VkDevice Device;
+	uint32_t QueueFamilyIdx;
+	VkQueue Queue;
+	VkSurfaceKHR Surface;
+	VkSwapchainKHR Swapchain;
+	//VkRenderPass RenderPass;
+	std::vector<VkImage> SwapchainImages;
+	std::vector<VkImageView> SwapchainImageViews;
+	std::vector<VkFramebuffer> Framebuffers;
+
+	std::vector<VkCommandBuffer> CommandBuffers;
+	std::vector<VkSemaphore> ImageAvailableSemaphores;
+	std::vector<VkSemaphore> RenderFinishedSemaphores;
+
+	std::vector<VkFence> InFlightFences;
+	std::vector<VkFence> ImagesInFlight;
+
+	uint32_t CurrentFrame;
+};
+
 void VKPrintLastError()
 {
 	fprintf(stderr, "[%s:%u] Last error: %s.\n", __FILE__, __LINE__, string_VkResult(g_vkResult));
@@ -40,16 +76,26 @@ void VKPrintLastError()
 
 bool VKCreateInstance(uint32_t reqVkInstExtNum, const char** reqVkInstExts, VkInstance *vkInst)
 {
-	std::vector<const char*> enableLayers = {
-		"VK_LAYER_KHRONOS_validation",
+	// Specify version version by ApplicationInfo.
+	VkApplicationInfo appInfo = {
+		.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+		.apiVersion = VK_API_VERSION_1_2,
 	};
 
+	// Enable layers
+	std::vector<const char*> enableLayers = {
+		"VK_LAYER_KHRONOS_validation",	// Enable validation layer.
+	};
+
+	// Required instance extensions.
 	std::vector<const char*> reqInstExts(reqVkInstExts, reqVkInstExts + reqVkInstExtNum);
 	// Append the debug report callback extension.
 	reqInstExts.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
 
+	// Create instance.
 	VkInstanceCreateInfo instCInfo = {
 		.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+		.pApplicationInfo = &appInfo,
 		.enabledLayerCount = (uint32_t)enableLayers.size(),
 		.ppEnabledLayerNames = enableLayers.data(),
 		.enabledExtensionCount = (uint32_t)reqInstExts.size(),
@@ -121,7 +167,7 @@ bool VKPickPhysicalDevice(VkInstance vkInst, VkPhysicalDevice *vkPhysicalDevice,
 bool VKCreateDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t vkQueueFamilyIdx, uint32_t vkQueueCnt, VkDevice *vkDevice)
 {
 	std::vector<float> queuePriorities(vkQueueCnt, 1.0f);
-	std::vector<const char*> vkDeviceExts = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+	std::vector<const char*> vkDeviceExts = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME };
 
 	// Create logical device and device queue.
 	VkDeviceQueueCreateInfo deviceQueueCInfo = {
@@ -130,8 +176,16 @@ bool VKCreateDevice(VkPhysicalDevice vkPhysicalDevice, uint32_t vkQueueFamilyIdx
 		.queueCount = vkQueueCnt,
 		.pQueuePriorities = queuePriorities.data(),
 	};
+
+	// Enable dynamic rendering extension.
+	VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamicRenderingFeatures = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
+		.dynamicRendering = VK_TRUE,
+	};
+
 	VkDeviceCreateInfo deviceCInfo = {
 		.sType{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO },
+		.pNext{ &dynamicRenderingFeatures },
 		.queueCreateInfoCount{ 1 },
 		.pQueueCreateInfos{ &deviceQueueCInfo },
 		.enabledLayerCount = 0,
@@ -364,11 +418,11 @@ int main(int argc, char** argv)
 	// Initialize SDL
 	SDL_Init(SDL_INIT_EVERYTHING);
 
-	// Create sdl window.
+	// Create SDL window.
 	const int winWidth = 1280;
 	const int winHeight = 720;
-	uint32_t sdlWindowFlags = SDL_WINDOW_VULKAN | SDL_WINDOW_ALLOW_HIGHDPI;
-	SDL_Window* win = SDL_CreateWindow("SDL Window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, winWidth, winHeight, SDL_WINDOW_VULKAN);
+	uint32_t sdlWindowFlags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+	SDL_Window* win = SDL_CreateWindow("SDL Window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, winWidth, winHeight, sdlWindowFlags);
 	if (!win) {
 		std::cerr << "Failed to create SDL window." << std::endl;
 		SDL_Quit();
@@ -397,6 +451,15 @@ int main(int argc, char** argv)
 		return -1;
 	}
 
+	//// Create multiple instances.
+	//std::vector<VkInstance> instances(1000);
+	//for (int i = 0; i < (int)instances.size(); ++i) {
+	//	std::cout << "Creating the " << i << "th instance." << std::endl;
+	//	if (!VKCreateInstance((uint32_t)reqVkInstExts.size(), reqVkInstExts.data(), &instances[i])) {
+	//		return -1;
+	//	}
+	//}
+
 	// Register debug report callback.
 	// RegisterDebugReportCallback(vkInst);
 
@@ -423,13 +486,28 @@ int main(int argc, char** argv)
 
 	// Create vulkan logical device.
 	VkDevice vkDevice = VK_NULL_HANDLE;
-	if (!VKCreateDevice(vkPhysicalDevice, vkQueueFamilyIdx, 1, &vkDevice)) {
+	if (!VKCreateDevice(vkPhysicalDevice, vkQueueFamilyIdx, 20, &vkDevice)) {
 		return -1;
 	}
 
 	// Get device queue.
 	VkQueue vkQueue = VK_NULL_HANDLE;
 	vkGetDeviceQueue(vkDevice, vkQueueFamilyIdx, 0, &vkQueue);
+
+	std::vector<VkDevice> devices(10);
+	for (int i = 0; i < (int)devices.size(); ++i) {
+		std::cout << "Creating the " << i << "th device." << std::endl;
+		if (!VKCreateDevice(vkPhysicalDevice, vkQueueFamilyIdx, 1, &devices[i])) {
+			return -1;
+		}
+	}
+
+	// Get multiple device queues.
+	std::vector<VkQueue> queues(1000);
+	for (int i = 0; i < (int)queues.size(); ++i) {
+		std::cout << "Getting the " << i << "th queue." << std::endl;
+		vkGetDeviceQueue(devices[i], vkQueueFamilyIdx, 0, &queues[i]);
+	}
 
 	// Create a command pool.
 	VkCommandPoolCreateInfo vkCmdPoolCInfo = {
@@ -492,6 +570,45 @@ int main(int argc, char** argv)
 		return -1;
 	}
 
+	// Create a renderpass.
+	VkRenderPass vkRenderPass = VK_NULL_HANDLE;
+	VkAttachmentDescription attachment = {};
+	attachment.format = vkSurfFmt.format;
+	attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+	VkAttachmentReference color_attachment = {};
+	color_attachment.attachment = 0;
+	color_attachment.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	VkSubpassDescription subpass = {};
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &color_attachment;
+
+	VkSubpassDependency dependency = {};
+	dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+	dependency.dstSubpass = 0;
+	dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependency.srcAccessMask = 0;
+	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+	VkRenderPassCreateInfo vkRenderPassCInfo = {};
+	vkRenderPassCInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	vkRenderPassCInfo.attachmentCount = 1;
+	vkRenderPassCInfo.pAttachments = &attachment;
+	vkRenderPassCInfo.subpassCount = 1;
+	vkRenderPassCInfo.pSubpasses = &subpass;
+	vkRenderPassCInfo.dependencyCount = 1;
+	vkRenderPassCInfo.pDependencies = &dependency;
+	VKCall(vkCreateRenderPass(vkDevice, &vkRenderPassCInfo, g_vkAllocator, &vkRenderPass));
+
 	// Get swap chain images.
 	uint32_t swapchainImgCnt;
 	VKCall(vkGetSwapchainImagesKHR(vkDevice, vkSwapchain, &swapchainImgCnt, nullptr));
@@ -518,6 +635,21 @@ int main(int argc, char** argv)
 			},
 		};
 		VKCall(vkCreateImageView(vkDevice, &imgViewCInfo, g_vkAllocator, &vkSwapchainImageViews[imgIdx]));
+	}
+
+	// Create framebuffers.
+	std::vector<VkFramebuffer> vkFramebuffers(swapchainImgCnt);
+	for (uint32_t imgIdx = 0; imgIdx < swapchainImgCnt; ++imgIdx) {
+		VkFramebufferCreateInfo framebufferCInfo = {
+			.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+			.renderPass = vkRenderPass,
+			.attachmentCount = 1,
+			.pAttachments = &vkSwapchainImageViews[imgIdx],
+			.width = (uint32_t)rtWidth,
+			.height = (uint32_t)rtHeight,
+			.layers = 1,
+		};
+		VKCall(vkCreateFramebuffer(vkDevice, &framebufferCInfo, g_vkAllocator, &vkFramebuffers[imgIdx]));
 	}
 
 	// Allocate a command buffer for each swapchain image.
@@ -552,9 +684,49 @@ int main(int argc, char** argv)
 		VKCall(vkCreateFence(vkDevice, &renderFinishedFenceCInfo, g_vkAllocator, &renderFinishedFences[inflightIdx]));
 	}
 
+	// Initialize imgUI
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO();
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+	// io.ConfigFlags != ImGuiConfigFlags_DockingEnable;
+
+	ImGui_ImplSDL2_InitForVulkan(win);
+	ImGui_ImplVulkan_InitInfo init_info = {
+		.Instance = vkInst,
+		.PhysicalDevice = vkPhysicalDevice,
+		.Device = vkDevice,
+		.QueueFamily = vkQueueFamilyIdx,
+		.Queue = vkQueue,
+		.DescriptorPool = VK_NULL_HANDLE,
+		.RenderPass = vkRenderPass,
+		.MinImageCount = inflightFrameCnt,
+		.ImageCount = inflightFrameCnt,
+		.MSAASamples = VK_SAMPLE_COUNT_1_BIT,
+		.PipelineCache = VK_NULL_HANDLE,
+		.Subpass = 0,
+		.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE * 2,
+		//.UseDynamicRendering = true,
+		//.PipelineRenderingCreateInfo = {
+		//	.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+		//	.pNext = nullptr,
+		//	.viewMask = 0x0,
+		//	.colorAttachmentCount = 1,
+		//	.pColorAttachmentFormats = &vkSurfFmt.format,
+		//	.depthAttachmentFormat = VK_FORMAT_UNDEFINED,
+		//	.stencilAttachmentFormat = VK_FORMAT_UNDEFINED,
+		//},
+		.Allocator = g_vkAllocator,
+	};
+	ImGui_ImplVulkan_Init(&init_info);
+
+	// Skip loading font.
+	io.Fonts->AddFontDefault();
+
 	// Enter SDL event loop.
 	std::deque<double> frameTimeHistory;  // In nanosecond
-	const size_t frameTimeMaxCnt = 10000;
+	const size_t frameTimeMaxCnt = 100;
 	double frameTimeSum = 0.0;
 	std::chrono::time_point prevFrameStartTimePoint = std::chrono::high_resolution_clock::now();
 	const int MaxFrameFPS = 120;
@@ -566,6 +738,9 @@ int main(int argc, char** argv)
 	while (!quit) {
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
+
+			ImGui_ImplSDL2_ProcessEvent(&event);
+
 			// Check quit.
 			quit |= (event.type == SDL_QUIT);  // Quit if ESC is pressed.
 			quit |= (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE);  // Quit if ESC is pressed.
@@ -573,6 +748,19 @@ int main(int argc, char** argv)
 				break;
 			}
 		}
+
+		// ImGui handles events.
+		
+
+		// ImGui start new frame.
+		ImGui_ImplSDL2_NewFrame();
+		ImGui_ImplVulkan_NewFrame();
+		ImGui::NewFrame();
+		ImGui::ShowDemoWindow();
+		ImGui::ShowMetricsWindow();
+		ImGui::ShowDebugLogWindow();
+		ImGui::ShowIDStackToolWindow();
+		ImGui::ShowAboutWindow();
 
 		// Maintain frame time history.
 		std::chrono::time_point currFrameStartTimePoint = std::chrono::high_resolution_clock::now();
@@ -678,6 +866,24 @@ int main(int argc, char** argv)
 			vkCmdPipelineBarrier(
 				vkCmdBuf, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
 				0, nullptr, 0, nullptr, 1, &presentImgBarrier);
+
+
+			VkClearValue clearValue = { 0.1f, 0.0f, 0.0f, 1.0f };
+			VkRenderPassBeginInfo renderPassBeginInfo = {};
+			renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+			renderPassBeginInfo.renderPass = vkRenderPass;
+			renderPassBeginInfo.framebuffer = vkFramebuffers[imgIdx];
+			renderPassBeginInfo.renderArea.extent.width = (uint32_t)rtWidth;
+			renderPassBeginInfo.renderArea.extent.height = (uint32_t)rtHeight;
+			renderPassBeginInfo.clearValueCount = 1;
+			renderPassBeginInfo.pClearValues = &clearValue;
+			vkCmdBeginRenderPass(vkCmdBuf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+			// ImGui render.
+			ImGui::Render();
+			ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vkCmdBuf);
+
+			vkCmdEndRenderPass(vkCmdBuf);
 			
 			// End the command buffer.
 			VKCall(vkEndCommandBuffer(vkCmdBuf));
@@ -725,6 +931,17 @@ int main(int argc, char** argv)
 
 	// Wait for all vulkan operations to complete.
 	VKCall(vkDeviceWaitIdle(vkDevice));
+
+	// ImGuid shutdown.
+	ImGui_ImplVulkan_Shutdown();
+	ImGui_ImplSDL2_Shutdown();
+	ImGui::DestroyContext();
+
+	// Free framebuffer and renderpass.
+	for (VkFramebuffer fb : vkFramebuffers) {
+		vkDestroyFramebuffer(vkDevice, fb, g_vkAllocator);
+	}
+	vkDestroyRenderPass(vkDevice, vkRenderPass, g_vkAllocator);
 
 	// Free vulkan objects.
 	for (VkSemaphore sema : imageAvailableSemaphores) {

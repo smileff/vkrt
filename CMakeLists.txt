@@ -10,13 +10,16 @@ set(CMAKE_CXX_STANDARD 20)
 
 # Add imgui lib.
 list(APPEND IMGUI_SOURCES
-    # $ENV{LIBS_ROOT}/imgui/imgui.cpp
-    # $ENV{LIBS_ROOT}/imgui/imgui_draw.cpp
-    # $ENV{LIBS_ROOT}/imgui/imgui_tables.cpp
-    # $ENV{LIBS_ROOT}/imgui/imgui_widgets.cpp
-    # $ENV{LIBS_ROOT}/imgui/imgui_demo.cpp
-    # $ENV{LIBS_ROOT}/imgui/backends/imgui_impl_glfw.cpp
-    # $ENV{LIBS_ROOT}/imgui/backends/imgui_impl_vulkan.cpp
+    $ENV{LIBS_ROOT}/imgui/imgui.cpp
+    $ENV{LIBS_ROOT}/imgui/imgui_draw.cpp
+    $ENV{LIBS_ROOT}/imgui/imgui_tables.cpp
+    $ENV{LIBS_ROOT}/imgui/imgui_widgets.cpp
+    $ENV{LIBS_ROOT}/imgui/imgui_demo.cpp
+    $ENV{LIBS_ROOT}/imgui/backends/imgui_impl_sdl2.cpp
+    $ENV{LIBS_ROOT}/imgui/backends/imgui_impl_vulkan.cpp
+    $ENV{LIBS_ROOT}/imgui/misc/cpp/imgui_stdlib.cpp 
+    $ENV{LIBS_ROOT}/imgui/misc/debuggers/imgui.natvis
+    $ENV{LIBS_ROOT}/imgui/misc/debuggers/imgui.natstepfilter
 )
 
 source_group("imgui" FILES ${IMGUI_SOURCES})
@@ -29,8 +32,9 @@ add_executable(vkrt ${SOURCES} ${IMGUI_SOURCES})
 
 list(APPEND EXTRA_INCLUDE_PATH
     $ENV{VULKAN_SDK}/Include
-    # $ENV{LIBS_ROOT}/imgui
-    # $ENV{LIBS_ROOT}/imgui/backends
+    $ENV{VULKAN_SDK}/Include/SDL2
+    $ENV{LIBS_ROOT}/imgui
+    $ENV{LIBS_ROOT}/imgui/backends
 )
 target_include_directories(vkrt PUBLIC ${EXTRA_INCLUDE_PATH})
 
