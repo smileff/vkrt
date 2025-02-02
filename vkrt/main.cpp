@@ -494,20 +494,20 @@ int main(int argc, char** argv)
 	VkQueue vkQueue = VK_NULL_HANDLE;
 	vkGetDeviceQueue(vkDevice, vkQueueFamilyIdx, 0, &vkQueue);
 
-	std::vector<VkDevice> devices(10);
-	for (int i = 0; i < (int)devices.size(); ++i) {
-		std::cout << "Creating the " << i << "th device." << std::endl;
-		if (!VKCreateDevice(vkPhysicalDevice, vkQueueFamilyIdx, 1, &devices[i])) {
-			return -1;
-		}
-	}
+	//std::vector<VkDevice> devices(10);
+	//for (int i = 0; i < (int)devices.size(); ++i) {
+	//	std::cout << "Creating the " << i << "th device." << std::endl;
+	//	if (!VKCreateDevice(vkPhysicalDevice, vkQueueFamilyIdx, 1, &devices[i])) {
+	//		return -1;
+	//	}
+	//}
 
-	// Get multiple device queues.
-	std::vector<VkQueue> queues(1000);
-	for (int i = 0; i < (int)queues.size(); ++i) {
-		std::cout << "Getting the " << i << "th queue." << std::endl;
-		vkGetDeviceQueue(devices[i], vkQueueFamilyIdx, 0, &queues[i]);
-	}
+	//// Get multiple device queues.
+	//std::vector<VkQueue> queues(1000);
+	//for (int i = 0; i < (int)queues.size(); ++i) {
+	//	std::cout << "Getting the " << i << "th queue." << std::endl;
+	//	vkGetDeviceQueue(devices[i], vkQueueFamilyIdx, 0, &queues[i]);
+	//}
 
 	// Create a command pool.
 	VkCommandPoolCreateInfo vkCmdPoolCInfo = {
