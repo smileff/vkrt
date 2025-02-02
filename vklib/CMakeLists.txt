@@ -25,16 +25,12 @@ list(APPEND SOURCES
     vklib.h
     vk_function.cpp
     vk_function.h
-    #vk_context.cpp
-    #vk_context.h
-    sdl_context.cpp
-    sdl_context.h
     imgui_function.cpp
     imgui_function.h
-    #app_context.cpp
-    #app_context.h
     fps_counter.cpp
     fps_counter.h
+    sdl_context.cpp
+    sdl_context.h
 )
 add_library(vklib STATIC ${SOURCES} ${IMGUI_SOURCES})
 
