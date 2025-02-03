@@ -31,6 +31,8 @@ list(APPEND SOURCES
     fps_counter.h
     sdl_context.cpp
     sdl_context.h
+    vma_usage.cpp
+    vma_usage.h
 )
 add_library(vklib STATIC ${SOURCES} ${IMGUI_SOURCES})
 

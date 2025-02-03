@@ -2,7 +2,6 @@
 #define _IMGUI_FUNCTION_H_
 
 #include "sdl_context.h"
-#include "vk_context.h"
 
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
