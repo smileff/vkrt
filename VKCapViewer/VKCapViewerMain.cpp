@@ -22,9 +22,7 @@ private:
 			{ m_vkQueueFamilyIdx, 1, {1.0f} },
 		};
 		const char* enableExtensionNames[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-		if (!VKCreateDevice(m_vkDevice, m_vkPhysicalDevice, vkQueueCreateRequests, 0, nullptr, 1, enableExtensionNames)) {
-			return false;
-		}
+		VKCreateDevice(m_vkDevice, m_vkPhysicalDevice, vkQueueCreateRequests, 0, nullptr, 1, enableExtensionNames);
 
 		// Get device queue.
 		vkGetDeviceQueue(m_vkDevice, m_vkQueueFamilyIdx, 0, &m_vkQueue);
@@ -35,11 +33,11 @@ private:
 			return false;
 		}
 
-		if (!m_swapchainContext.InitSwapchain(m_vkDevice, m_vkQueueFamilyIdx, m_vkSurface, vkSwapchainSurfaceFormat, m_rtWidth, m_rtHeight)) {
+		if (!m_swapchainContext.InitSwapchain(m_vkQueueFamilyIdx, m_vkSurface, vkSwapchainSurfaceFormat, m_rtWidth, m_rtHeight)) {
 			return false;
 		}
 
-		if (!m_inflightContext.InitInflight(m_vkDevice)) {
+		if (!m_inflightContext.InitInflight()) {
 			return false;
 		}
 
@@ -61,7 +59,7 @@ private:
 				.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
 				.queueFamilyIndex = m_vkQueueFamilyIdx,
 			};
-			VKCall(vkCreateCommandPool(m_vkDevice, &vkCmdPoolCInfo, g_vkAllocator, &m_vkCmdPool));
+			VKCall(vkCreateCommandPool(m_vkDevice, &vkCmdPoolCInfo, m_vkAllocator, &m_vkCmdPool));
 		}
 
 		// Create command buffer.
@@ -75,6 +73,13 @@ private:
 				.commandBufferCount = (uint32_t)m_vkCmdBufs.size(),
 			};
 			VKCall(vkAllocateCommandBuffers(m_vkDevice, &vkCmdBufAllocInfo, m_vkCmdBufs.data()));
+		}
+
+		// Create pipeline.
+		std::string vertShaderPath = "shaders/test.vert";
+		std::string fragShaderPath = "shaders/test.frag";
+		if (!m_vkGraphicsPipeline.CreatePipeline(m_swapchainContext.GetSwapchainRenderPass(), vertShaderPath, fragShaderPath)) {
+			return false;
 		}
 
 		return true;
@@ -115,6 +120,11 @@ private:
 		};
 		VKCall(vkBeginCommandBuffer(cmdBuf, &cmdBufBeginInfo));
 
+		// Set viewport and scissor.
+		VkRect2D swapchainRect = m_swapchainContext.GetSwapchainRect();
+		VkViewport viewport = { 0, 0, (float)swapchainRect.extent.width, (float)swapchainRect.extent.height, 0.0f, 1.0f };
+		vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
+		vkCmdSetScissor(cmdBuf, 0, 1, &swapchainRect);
 
 		VkClearValue clearValue = { VkClearColorValue{ 0.1f, 0.0f, 0.0f, 1.0f } };
 		VkRenderPassBeginInfo renderPassBeginInfo = {
@@ -126,6 +136,10 @@ private:
 			.pClearValues = &clearValue,
 		};
 		vkCmdBeginRenderPass(cmdBuf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+		vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_vkGraphicsPipeline);
+
+		vkCmdDraw(cmdBuf, 3, 1, 0, 0);
 
 		// ImGui render.
 		ImGui::Render();
@@ -167,8 +181,10 @@ private:
 	{
 		vkDeviceWaitIdle(m_vkDevice);
 
+		m_vkGraphicsPipeline.~VKGraphicsPipeline();
+
 		if (m_vkCmdPool) {
-			vkDestroyCommandPool(m_vkDevice, m_vkCmdPool, g_vkAllocator);
+			vkDestroyCommandPool(m_vkDevice, m_vkCmdPool, m_vkAllocator);
 		}
 
 		ImGuiShutdown();
@@ -181,7 +197,7 @@ private:
 		}
 
 		if (m_vkDevice != VK_NULL_HANDLE) {
-			vkDestroyDevice(m_vkDevice, g_vkAllocator);
+			vkDestroyDevice(m_vkDevice, m_vkAllocator);
 			m_vkDevice = VK_NULL_HANDLE;
 		}
 
@@ -190,12 +206,12 @@ private:
 		}
 
 		if (m_vkSurface != VK_NULL_HANDLE) {
-			vkDestroySurfaceKHR(m_vkInstance, m_vkSurface, g_vkAllocator);
+			vkDestroySurfaceKHR(m_vkInstance, m_vkSurface, m_vkAllocator);
 			m_vkSurface = VK_NULL_HANDLE;
 		}
 
 		if (m_vkInstance) {
-			vkDestroyInstance(m_vkInstance, g_vkAllocator);
+			vkDestroyInstance(m_vkInstance, m_vkAllocator);
 			m_vkInstance = VK_NULL_HANDLE;
 		}
 
@@ -205,19 +221,27 @@ private:
 private:
 	SDL_Window* m_window = nullptr;
 
+	VkAllocationCallbacks* m_vkAllocator = nullptr;
+
 	uint32_t m_rtWidth = 0, m_rtHeight = 0;
 	VkInstance m_vkInstance = VK_NULL_HANDLE;
 	VkSurfaceKHR m_vkSurface = VK_NULL_HANDLE;
 	VkPhysicalDevice m_vkPhysicalDevice = VK_NULL_HANDLE;
+
 	VkDevice m_vkDevice = VK_NULL_HANDLE;
 	uint32_t m_vkQueueFamilyIdx = (uint32_t)-1;
 	VkQueue m_vkQueue = VK_NULL_HANDLE;
 
-	VKSwapchainContext m_swapchainContext;
-	VKInflightContext m_inflightContext;
+	VKObjectContext m_vkDeviceContext = { m_vkInstance, m_vkPhysicalDevice, m_vkDevice, m_vkAllocator, "DeviceContext"};
+
+	VKSwapchainContext m_swapchainContext = { m_vkDeviceContext };
+	VKInflightContext m_inflightContext = { m_vkDeviceContext };
 
 	VkCommandPool m_vkCmdPool = VK_NULL_HANDLE;
 	std::vector<VkCommandBuffer> m_vkCmdBufs;
+
+	VKGraphicsPipeline m_vkGraphicsPipeline = { m_vkDeviceContext, "GraphicsPipeline" };
+
 };
 
 int main(int argc, char** argv)
