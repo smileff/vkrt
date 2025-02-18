@@ -22,8 +22,6 @@
 #include "vulkan/vulkan.h"
 #include "vulkan/vk_enum_string_helper.h"
 
-extern VkAllocationCallbacks* g_vkAllocator;
-
 extern VkResult g_vkLastResult;
 void VKPrintLastError();
 
@@ -74,49 +72,70 @@ bool VKRegisterDebugReportCallback(VkInstance vkInst);
 
 bool VKPickSurfaceFormat(VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSurf, VkSurfaceFormatKHR& surfFmt);
 
-class VKObjectContext
+class VKDeviceContext
 {
 public:
-	VKObjectContext(const VkInstance& vkInst, const VkPhysicalDevice& vkPhysicalDevice, const VkDevice& vkDevice, const VkAllocationCallbacks* const& allocator, const char* name)
-		: m_vkInstance(vkInst), m_vkPhysicalDevice(vkPhysicalDevice), m_vkDevice(vkDevice), m_vkAllocator(allocator)
-	{
-		if (name) {
-			m_name = name;
-		}
-	}
+	VKDeviceContext(const VkInstance& vkInst, const VkPhysicalDevice& vkPhysicalDevice, const VkDevice& vkDevice, const char* vkCtxName = nullptr)
+		: m_vkInstance(vkInst), m_vkPhysicalDevice(vkPhysicalDevice), m_vkDevice(vkDevice), m_vkContextName(vkCtxName)
+	{}
 
-	VKObjectContext(const VKObjectContext& vkDeviceCtx, const char* name)
-		: m_vkInstance(vkDeviceCtx.m_vkInstance), m_vkPhysicalDevice(vkDeviceCtx.m_vkPhysicalDevice), m_vkDevice(vkDeviceCtx.m_vkDevice), m_vkAllocator(vkDeviceCtx.m_vkAllocator), m_name(vkDeviceCtx.m_name)
-	{
-		if (name) {
-			if (m_name != "") {
-				m_name += "-";
-			}
-			m_name += name;
-		}
-	}
+	VKDeviceContext(const VKDeviceContext& vkDeviceCtx)
+		: m_vkInstance(vkDeviceCtx.m_vkInstance), m_vkPhysicalDevice(vkDeviceCtx.m_vkPhysicalDevice), m_vkDevice(vkDeviceCtx.m_vkDevice), m_vkContextName(vkDeviceCtx.m_vkContextName)
+	{}
 
 	const VkInstance& GetInstance() const { return m_vkInstance; }
 	const VkPhysicalDevice& GetPhysicalDevice() const { return m_vkPhysicalDevice; }
 	const VkDevice& GetDevice() const { return m_vkDevice; }
-	const VkAllocationCallbacks* const& GetAllocator() const { return m_vkAllocator; }
-
-	const char* GetName() const { return m_name.c_str(); }
+	std::string GetContextName() const { return m_vkContextName ? m_vkContextName : ""; }
 
 private:
-	std::string m_name = "";
 	const VkInstance& m_vkInstance;
 	const VkPhysicalDevice& m_vkPhysicalDevice;
 	const VkDevice& m_vkDevice;
-	const VkAllocationCallbacks* const& m_vkAllocator;
+	const char* m_vkContextName = nullptr;
+};
+
+class VKObject
+{
+public:
+	VKObject(const VKDeviceContext& vkDeviceCtx, const char* objName = nullptr, VkAllocationCallbacks* vkAllocator = nullptr)
+		: m_vkDeviceContext(vkDeviceCtx)
+		, m_vkAllocator(vkAllocator)
+	{
+		if (objName) {
+			m_objName = m_vkDeviceContext.GetContextName();
+			if (!m_objName.empty()) {
+				m_objName += ".";
+			}
+			if (objName) {
+				m_objName += objName;
+			} else {
+				m_objName += "UnnamedObject";
+			}
+		}
+	}
+
+	const VKDeviceContext& GetDeviceContext() const { return m_vkDeviceContext; }
+	const VkInstance& GetInstance() const { return m_vkDeviceContext.GetInstance(); }
+	const VkPhysicalDevice& GetPhysicalDevice() const { return m_vkDeviceContext.GetPhysicalDevice(); }
+	const VkDevice& GetDevice() const { return m_vkDeviceContext.GetDevice(); }
+
+	const VkAllocationCallbacks* GetAllocator() const { return m_vkAllocator; }
+
+	const char* GetName() const { return m_objName.c_str(); }
+
+private:
+	const VKDeviceContext& m_vkDeviceContext;
+	const VkAllocationCallbacks* m_vkAllocator = nullptr;
+	std::string m_objName;
 };
 
 // Swapchain vulkan objects.
-class VKSwapchainContext : public VKObjectContext
+class VKSwapchainContext : public VKObject
 {
 public:
 
-	VKSwapchainContext(const VKObjectContext& vkDeviceContext, const char* name = "SwapchainContext", int swapchainImageNum = 3, VkAllocationCallbacks* vkAllocator = nullptr);
+	VKSwapchainContext(const VKDeviceContext& vkDeviceContext, const char* name = "SwapchainContext", int swapchainImageNum = 3, VkAllocationCallbacks* vkAllocator = nullptr);
 	virtual ~VKSwapchainContext();
 
 	bool InitSwapchain(uint32_t queueFamilyIdx, VkSurfaceKHR vkSurf, VkSurfaceFormatKHR vkSurfaceFormat, uint32_t rtWidth, uint32_t rtHeight);
@@ -134,7 +153,6 @@ public:
 	const VkFramebuffer& GetSwapchainFramebuffer() const { return m_swapchainFramebuffers[m_swapchainImageIdx]; }
 
 private:
-	VkAllocationCallbacks* m_vkAllocator = nullptr;
 	const int m_swapchainImageNum;
 	uint32_t m_swapchainImageIdx = (uint32_t)-1;
 	VkSurfaceFormatKHR m_vkSwapchainSurfaceFormat = {};
@@ -146,10 +164,10 @@ private:
 };
 
 // Semaphores and fences for inflight rendering.
-class VKInflightContext : public VKObjectContext
+class VKInflightContext : public VKObject
 {
 public:
-	VKInflightContext(const VKObjectContext& vkDeviceContext, const char* name = "InflightContext", int inflightFrameNum = 2, VkAllocationCallbacks* vkAllocator = nullptr);
+	VKInflightContext(const VKDeviceContext& vkDeviceContext, const char* name = "InflightContext", int inflightFrameNum = 2, VkAllocationCallbacks* vkAllocator = nullptr);
 	virtual ~VKInflightContext();
 
 	bool InitInflight();
@@ -166,7 +184,6 @@ public:
 	void NextFrame();
 
 private:
-	VkAllocationCallbacks* m_vkAllocator = nullptr;
 	const uint32_t m_inflightFrameNum = 2;
 	uint32_t m_inflightFrameIdx = 0;
 	std::vector<VkSemaphore> m_vkImageAvailableSemaphores;
@@ -174,12 +191,13 @@ private:
 	std::vector<VkFence> m_vkInflightFrameFences;
 };
 
-bool CompileShader(const std::string& shaderFilepath, const std::string& options, const std::string& outputFilepath);
+bool VKCompileShader(const std::string& shaderFilepath, const std::string& options, const std::string& outputFilepath);
 
-class VKShaderModule : public VKObjectContext
+class VKShaderModule : public VKObject
 {
 public:
-	VKShaderModule(const VKObjectContext& vkDeviceCtx, const char* name = "VKShaderModule", VkAllocationCallbacks* vkAllocator = nullptr) : VKObjectContext(vkDeviceCtx, name) {}
+	VKShaderModule(const VKDeviceContext& vkDeviceCtx, const char* name = "VKShaderModule", VkAllocationCallbacks* vkAllocator = nullptr) 
+		: VKObject(vkDeviceCtx, name, vkAllocator) {}
 	~VKShaderModule();
 
 	bool CreateShaderModule(const std::string& shaderFilepath);	
@@ -190,11 +208,12 @@ private:
 	VkShaderModule m_shaderModule = VK_NULL_HANDLE;
 };
 
-class VKGraphicsPipeline : public VKObjectContext
+class VKGraphicsPipeline : public VKObject
 {
 public:
 
-	VKGraphicsPipeline(const VKObjectContext& vkDeviceCtx, const char* name = "GraphicsPipeline") : VKObjectContext(vkDeviceCtx, name) {}
+	VKGraphicsPipeline(const VKDeviceContext& vkDeviceCtx, const char* name = "GraphicsPipeline", VkAllocationCallbacks* vkAllocator = nullptr) 
+		: VKObject(vkDeviceCtx, name, vkAllocator) {}
 
 	virtual ~VKGraphicsPipeline();
 
@@ -210,7 +229,6 @@ public:
 	
 private:
 	VkPipeline m_vkPipeline = VK_NULL_HANDLE;
-
 };
 
 #endif

@@ -33,7 +33,7 @@ void ImGuiInitialize(
 		.PipelineCache = VK_NULL_HANDLE,
 		.Subpass = 0,
 		.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE * 2,
-		.Allocator = g_vkAllocator,
+		.Allocator = nullptr,
 	};
 	ImGui_ImplVulkan_Init(&init_info);
 }

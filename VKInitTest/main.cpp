@@ -22,8 +22,6 @@
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_vulkan.h"
 
-static const VkAllocationCallbacks* g_vkAllocator = nullptr;
-
 #define VKCall(code)\
 {\
 	VkResult res = (code);\
@@ -268,7 +266,7 @@ int main(int argc, char** argv)
 		.ppEnabledExtensionNames = reqInstExts.data(),
 	};
 	VkInstance vkInst = VK_NULL_HANDLE;
-	VKCall(vkCreateInstance(&instCInfo, g_vkAllocator, &vkInst));
+	VKCall(vkCreateInstance(&instCInfo, nullptr, &vkInst));
 
 	PrintPhysicalDeviceInfo(vkInst);
 	std::cout << std::endl;
@@ -319,7 +317,7 @@ int main(int argc, char** argv)
 		.enabledExtensionCount = (uint32_t)vkDeviceExts.size(),
 		.ppEnabledExtensionNames = vkDeviceExts.data(),
 	};
-	VKCall(vkCreateDevice(vkPhysicalDevice, &deviceCInfo, g_vkAllocator, &vkDevice));
+	VKCall(vkCreateDevice(vkPhysicalDevice, &deviceCInfo, nullptr, &vkDevice));
 
 	// Get device queue.
 	VkQueue vkQueue = VK_NULL_HANDLE;
@@ -340,8 +338,8 @@ int main(int argc, char** argv)
 	//	vkGetDeviceQueue(devices[i], vkQueueFamilyIdx, 0, &queues[i]);
 	//}
 
-	vkDestroyDevice(vkDevice, g_vkAllocator);
-	vkDestroyInstance(vkInst, g_vkAllocator);
+	vkDestroyDevice(vkDevice, nullptr);
+	vkDestroyInstance(vkInst, nullptr);
 	
 	return 0;
 }

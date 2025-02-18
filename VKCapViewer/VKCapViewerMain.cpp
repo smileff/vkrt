@@ -232,7 +232,7 @@ private:
 	uint32_t m_vkQueueFamilyIdx = (uint32_t)-1;
 	VkQueue m_vkQueue = VK_NULL_HANDLE;
 
-	VKObjectContext m_vkDeviceContext = { m_vkInstance, m_vkPhysicalDevice, m_vkDevice, m_vkAllocator, "DeviceContext"};
+	VKDeviceContext m_vkDeviceContext = { m_vkInstance, m_vkPhysicalDevice, m_vkDevice, "DeviceContext"};
 
 	VKSwapchainContext m_swapchainContext = { m_vkDeviceContext };
 	VKInflightContext m_inflightContext = { m_vkDeviceContext };

@@ -1,13 +1,13 @@
 #include "vk_function.h"
 
-VkAllocationCallbacks* g_vkAllocator = nullptr;
-
 VkResult g_vkLastResult = VK_RESULT_MAX_ENUM;
 
 void VKPrintLastError()
 {
 	fprintf(stderr, "[%s:%u] Last error: %s.\n", __FILE__, __LINE__, string_VkResult(g_vkLastResult));
 }
+
+// SetDebugUtils --------------------------------------------------------
 
 PFN_vkSetDebugUtilsObjectNameEXT VKSetDebugUtilsObjectName = nullptr;
 
@@ -44,6 +44,8 @@ void VKSetDebugObjectName(VkDevice vkDevice, VkObjectType vkObjType, uint64_t vk
 //		VKSetDebugUtilsObjectName(vkDevice, &nameInfo);
 //	}
 //}
+
+// CreateInstance
 
 bool VKCreateInstance(VkInstance& vkInst, size_t instExtNum, const char** instExts, size_t enableLayerNum, const char** enableLayers, VkAllocationCallbacks* allocator)
 {
@@ -82,6 +84,8 @@ bool VKCreateInstance(VkInstance& vkInst, size_t instExtNum, const char** instEx
 
 	return true;
 }
+
+// PickPhysicalDevice 
 
 bool VKPickPhysicalDeviceAndOneQueueFamily(VkInstance inst, VkSurfaceKHR surf, VkPhysicalDevice* toPickPhysDevice, uint32_t* toPickQueueFamilyIdx)
 {
@@ -141,6 +145,8 @@ bool VKPickPhysicalDeviceAndOneQueueFamily(VkInstance inst, VkSurfaceKHR surf, V
 
 	return true;
 }
+
+// CreateDevice
 
 bool VKCreateDevice(
 	VkDevice& vkDevice,
@@ -344,7 +350,7 @@ bool VKRegisterDebugReportCallback(VkInstance vkInst)
 		.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT,
 		.pfnCallback = VKDebugReportCallback,
 	};
-	if (VKFailed(vkCreateDebugReportCallbackEXT(vkInst, &debugReportCallbackCInfo, g_vkAllocator, &vkDebugReportCallback))) {
+	if (VKFailed(vkCreateDebugReportCallbackEXT(vkInst, &debugReportCallbackCInfo, nullptr, &vkDebugReportCallback))) {
 		VKPrintLastError();
 		return false;
 	}
@@ -386,10 +392,9 @@ bool VKPickSurfaceFormat(VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSurf,
 	return false;
 }
 
-VKSwapchainContext::VKSwapchainContext(const VKObjectContext& vkDeviceContext, const char* name, int swapchainImageNum, VkAllocationCallbacks* vkAllocator)
-	: VKObjectContext(vkDeviceContext, name)
+VKSwapchainContext::VKSwapchainContext(const VKDeviceContext& vkDeviceContext, const char* name, int swapchainImageNum, VkAllocationCallbacks* vkAllocator)
+	: VKObject(vkDeviceContext, name, vkAllocator)
 	, m_swapchainImageNum(swapchainImageNum)
-	, m_vkAllocator(vkAllocator)
 {}
 
 VKSwapchainContext::~VKSwapchainContext()
@@ -398,7 +403,7 @@ VKSwapchainContext::~VKSwapchainContext()
 		[this](VkFramebuffer& fb)
 		{
 			if (fb != VK_NULL_HANDLE) {
-				vkDestroyFramebuffer(GetDevice(), fb, m_vkAllocator);
+				vkDestroyFramebuffer(GetDevice(), fb, GetAllocator());
 				fb = VK_NULL_HANDLE;
 			}
 		});
@@ -407,18 +412,18 @@ VKSwapchainContext::~VKSwapchainContext()
 		[this](VkImageView imageView)
 		{
 			if (imageView) {
-				vkDestroyImageView(GetDevice(), imageView, m_vkAllocator);
+				vkDestroyImageView(GetDevice(), imageView, GetAllocator());
 				imageView = VK_NULL_HANDLE;
 			}
 		});
 
 	if (m_swapchainRenderPass != VK_NULL_HANDLE) {
-		vkDestroyRenderPass(GetDevice(), m_swapchainRenderPass, m_vkAllocator);
+		vkDestroyRenderPass(GetDevice(), m_swapchainRenderPass, GetAllocator());
 		m_swapchainRenderPass = VK_NULL_HANDLE;
 	}
 
 	if (m_vkSwapchain != VK_NULL_HANDLE) {
-		vkDestroySwapchainKHR(GetDevice(), m_vkSwapchain, m_vkAllocator);
+		vkDestroySwapchainKHR(GetDevice(), m_vkSwapchain, GetAllocator());
 		m_vkSwapchain = VK_NULL_HANDLE;
 	}
 }
@@ -444,7 +449,7 @@ bool VKSwapchainContext::InitSwapchain(uint32_t queueFamilyIdx, VkSurfaceKHR vkS
 			.presentMode = VK_PRESENT_MODE_FIFO_KHR,
 			.clipped = VK_TRUE,
 	};
-	if (VKFailed(vkCreateSwapchainKHR(GetDevice(), &vkSwapchainCInfo, m_vkAllocator, &m_vkSwapchain))) {
+	if (VKFailed(vkCreateSwapchainKHR(GetDevice(), &vkSwapchainCInfo, GetAllocator(), &m_vkSwapchain))) {
 		VKPrintLastError();
 		return false;
 	}
@@ -476,7 +481,7 @@ bool VKSwapchainContext::InitSwapchain(uint32_t queueFamilyIdx, VkSurfaceKHR vkS
 				.layerCount = 1,
 			},
 		};
-		VKCall(vkCreateImageView(GetDevice(), &imageViewCInfo, m_vkAllocator, &m_swapchainImageViews[i]));
+		VKCall(vkCreateImageView(GetDevice(), &imageViewCInfo, GetAllocator(), &m_swapchainImageViews[i]));
 	}
 
 	// Create render pass for the swapchain.
@@ -524,7 +529,7 @@ bool VKSwapchainContext::InitSwapchain(uint32_t queueFamilyIdx, VkSurfaceKHR vkS
 			.pDependencies = &subpassDep,
 		};
 
-		if (VKFailed(vkCreateRenderPass(GetDevice(), &renderPassCInfo, m_vkAllocator, &m_swapchainRenderPass))) {
+		if (VKFailed(vkCreateRenderPass(GetDevice(), &renderPassCInfo, GetAllocator(), &m_swapchainRenderPass))) {
 			VKPrintLastError();
 			return false;
 		}
@@ -542,7 +547,7 @@ bool VKSwapchainContext::InitSwapchain(uint32_t queueFamilyIdx, VkSurfaceKHR vkS
 			.height = rtHeight,
 			.layers = 1,
 		};
-		vkCreateFramebuffer(GetDevice(), &framebufferCInfo, m_vkAllocator, &m_swapchainFramebuffers[i]);
+		vkCreateFramebuffer(GetDevice(), &framebufferCInfo, GetAllocator(), &m_swapchainFramebuffers[i]);
 	}
 
 	return true;
@@ -560,10 +565,9 @@ bool VKSwapchainContext::AcquireNextSwapchainImage(VkSemaphore imageAvailableSem
 	}
 }
 
-VKInflightContext::VKInflightContext(const VKObjectContext& vkDeviceContext, const char* name, int inflightFrameNum, VkAllocationCallbacks* vkAllocator)
-	: VKObjectContext(vkDeviceContext, name)
+VKInflightContext::VKInflightContext(const VKDeviceContext& vkDeviceContext, const char* name, int inflightFrameNum, VkAllocationCallbacks* vkAllocator)
+	: VKObject(vkDeviceContext, name, vkAllocator)
 	, m_inflightFrameNum(inflightFrameNum)
-	, m_vkAllocator(vkAllocator)
 {}
 
 VKInflightContext::~VKInflightContext()
@@ -571,19 +575,19 @@ VKInflightContext::~VKInflightContext()
 	std::for_each(m_vkInflightFrameFences.begin(), m_vkInflightFrameFences.end(),
 		[this](VkFence& fence)
 		{
-			vkDestroyFence(GetDevice(), fence, m_vkAllocator);
+			vkDestroyFence(GetDevice(), fence, GetAllocator());
 			fence = VK_NULL_HANDLE;
 		});
 	std::for_each(m_vkRenderFinishedSemaphores.begin(), m_vkRenderFinishedSemaphores.end(),
 		[this](VkSemaphore& sema)
 		{
-			vkDestroySemaphore(GetDevice(), sema, m_vkAllocator);
+			vkDestroySemaphore(GetDevice(), sema, GetAllocator());
 			sema = VK_NULL_HANDLE;
 		});
 	std::for_each(m_vkImageAvailableSemaphores.begin(), m_vkImageAvailableSemaphores.end(),
 		[this](VkSemaphore& sema)
 		{
-			vkDestroySemaphore(GetDevice(), sema, m_vkAllocator);
+			vkDestroySemaphore(GetDevice(), sema, GetAllocator());
 			sema = VK_NULL_HANDLE;
 		});
 }
@@ -600,11 +604,11 @@ bool VKInflightContext::InitInflight()
 		VkSemaphoreCreateInfo semaphoreCInfo = {
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
 		};
-		if (VKFailed(vkCreateSemaphore(GetDevice(), &semaphoreCInfo, m_vkAllocator, &m_vkImageAvailableSemaphores[inflightIdx]))) {
+		if (VKFailed(vkCreateSemaphore(GetDevice(), &semaphoreCInfo, GetAllocator(), &m_vkImageAvailableSemaphores[inflightIdx]))) {
 			VKPrintLastError();
 			return false;
 		}
-		if (VKFailed(vkCreateSemaphore(GetDevice(), &semaphoreCInfo, m_vkAllocator, &m_vkRenderFinishedSemaphores[inflightIdx]))) {
+		if (VKFailed(vkCreateSemaphore(GetDevice(), &semaphoreCInfo, GetAllocator(), &m_vkRenderFinishedSemaphores[inflightIdx]))) {
 			VKPrintLastError();
 			return false;
 		}
@@ -614,7 +618,7 @@ bool VKInflightContext::InitInflight()
 			.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
 			.flags = VK_FENCE_CREATE_SIGNALED_BIT,		// Initially signaled.
 		};
-		if (VKFailed(vkCreateFence(GetDevice(), &fenceCInfo, m_vkAllocator, &m_vkInflightFrameFences[inflightIdx]))) {
+		if (VKFailed(vkCreateFence(GetDevice(), &fenceCInfo, GetAllocator(), &m_vkInflightFrameFences[inflightIdx]))) {
 			VKPrintLastError();
 			return false;
 		}
@@ -644,7 +648,7 @@ void VKInflightContext::NextFrame()
 const std::string GLSLCompilerCmd = "glslc";
 
 // Compile shader
-bool CompileShader(const std::string& shaderFilepath, const std::string& options, const std::string& outputFilepath)
+bool VKCompileShader(const std::string& shaderFilepath, const std::string& options, const std::string& outputFilepath)
 {
 	std::string command = GLSLCompilerCmd + " " + options + " " + shaderFilepath + " -o " + outputFilepath + ".spv";
 
@@ -668,16 +672,11 @@ VKShaderModule::~VKShaderModule()
 
 bool VKShaderModule::CreateShaderModule(const std::string& filepath)
 {
-	// Compile shader using glslc.
-	std::string outputFilename = filepath + ".spv";
-	//if (!CompileShader(filepath, "", outputFilename)) {
-	//	return false;
-	//}
-
 	// Load the compiled binary data.
-	std::ifstream file(outputFilename, std::ios::ate | std::ios::binary);
+	std::string spvFilename = filepath + ".spv";
+	std::ifstream file(spvFilename, std::ios::ate | std::ios::binary);
 	if (!file) {
-		std::cerr << "Failed to open compiled file: " << outputFilename << std::endl;
+		std::cerr << "Failed to open compiled file: " << spvFilename << std::endl;
 		return false;
 	}
 	size_t fileSize = (size_t)file.tellg();
@@ -686,7 +685,7 @@ bool VKShaderModule::CreateShaderModule(const std::string& filepath)
 	file.read(shaderCode.data(), fileSize);
 	file.close();
 	if (!file) {
-		std::cerr << "Failed to read compiled file: " << outputFilename << std::endl;
+		std::cerr << "Failed to read compiled file: " << spvFilename << std::endl;
 		return false;
 	}
 
@@ -727,11 +726,11 @@ void VKGraphicsPipeline::ConfigurePipelineLayoutCreateInfo(VkPipelineLayoutCreat
 bool VKGraphicsPipeline::CreatePipeline(VkRenderPass renderPass, const std::string& vertShaderPath, const std::string& fragShaderPath)
 {
 	// Compile shader
-	VKShaderModule vertShaderModule(*this);
+	VKShaderModule vertShaderModule(GetDeviceContext());
 	if (!vertShaderModule.CreateShaderModule(vertShaderPath)) {
 		return false;
 	}
-	VKShaderModule fragShaderModule(*this);
+	VKShaderModule fragShaderModule(GetDeviceContext());
 	if (!fragShaderModule.CreateShaderModule(fragShaderPath)) {
 		return false;
 	}
@@ -744,7 +743,7 @@ bool VKGraphicsPipeline::CreatePipeline(VkRenderPass renderPass, const std::stri
 		std::wcerr << L"Failed to create pipeline layout!";
 		return false;
 	}
-	auto deleter = [vkDevice = GetDevice(), vkAllocator = g_vkAllocator](VkPipelineLayout* ptr)
+	auto deleter = [vkDevice = GetDevice(), vkAllocator = GetAllocator()](VkPipelineLayout* ptr)
 		{
 			vkDestroyPipelineLayout(vkDevice, *ptr, vkAllocator);
 		};
