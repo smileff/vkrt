@@ -2,55 +2,67 @@
 
 class VKCapViewerApp : public SDLContext
 {
-private:
-	virtual bool Initialize(SDL_Window* window, VkInstance vkInst, VkSurfaceKHR vkSurf) override
+public:
+	virtual bool Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, const VkSurfaceKHR& vkSurf) override
 	{
-		m_window = window;
-		m_vkInstance = vkInst;
+		m_window = sdlWin;
 		m_vkSurface = vkSurf;
 
-		// Get rt size.
-		SDL_Vulkan_GetDrawableSize(window, (int*)&m_rtWidth, (int*)&m_rtHeight);
-
 		// Pick physical device and queue family.
-		if (!VKPickPhysicalDeviceAndOneQueueFamily(m_vkInstance, m_vkSurface, &m_vkPhysicalDevice, &m_vkQueueFamilyIdx)) {
+		VkPhysicalDevice vkPhysicalDevice;
+		uint32_t vkQueueFamilyIdx;
+		if (!VKPickPhysicalDeviceAndOneQueueFamily(vkInst, vkSurf, &vkPhysicalDevice, &vkQueueFamilyIdx)) {
 			return false;
 		}
 
-		// Create logical device.
-		std::vector<VKDeviceQueueCreateRequest> vkQueueCreateRequests = {
-			{ m_vkQueueFamilyIdx, 1, {1.0f} },
-		};
-		const char* enableExtensionNames[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-		VKCreateDevice(m_vkDevice, m_vkPhysicalDevice, vkQueueCreateRequests, 0, nullptr, 1, enableExtensionNames);
+		// 
+		m_ctx = std::make_unique<VKDeviceContext>("DeviceContext");
 
-		// Get device queue.
-		vkGetDeviceQueue(m_vkDevice, m_vkQueueFamilyIdx, 0, &m_vkQueue);
+		std::vector<VKDeviceQueueCreateRequest> vkQueueCreateRequests = {
+			{ vkQueueFamilyIdx, 1, {1.0f} },
+		};
+		const char* extensionNames[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+		if (!m_ctx->CreateDevice(vkInst, vkPhysicalDevice, vkQueueCreateRequests.size(), vkQueueCreateRequests.data(), 0, nullptr, 1, extensionNames)) {
+			return false;
+		}
+		if (!m_ctx->CreateGlobalObjects()) {
+			return false;
+		}
+
+		m_vkDevice = m_ctx->GetDevice();
+		m_vkQueueFamilyIdx = m_ctx->GetQueueFamilyIdx(0);
+		m_vkQueue = m_ctx->GetQueueFamilyQueue(0, 0);
 
 		// Determine the main surface format.
 		VkSurfaceFormatKHR vkSwapchainSurfaceFormat;
-		if (!VKPickSurfaceFormat(m_vkPhysicalDevice, m_vkSurface, vkSwapchainSurfaceFormat)) {
+		if (!VKPickSurfaceFormat(m_ctx->GetPhysicalDevice(), m_vkSurface, vkSwapchainSurfaceFormat)) {
 			return false;
 		}
 
-		if (!m_swapchainContext.InitSwapchain(m_vkQueueFamilyIdx, m_vkSurface, vkSwapchainSurfaceFormat, m_rtWidth, m_rtHeight)) {
+		// Get rt size.
+		uint32_t rtWidth, rtHeight;
+		SDL_Vulkan_GetDrawableSize(m_window, (int*)&rtWidth, (int*)&rtHeight);
+
+		m_swapchainContext = std::make_unique<VKSwapchainContext>(*m_ctx);
+		if (!m_swapchainContext->InitSwapchain(m_vkQueueFamilyIdx, m_vkSurface, vkSwapchainSurfaceFormat, rtWidth, rtHeight)) {
 			return false;
 		}
 
-		if (!m_inflightContext.InitInflight()) {
+		m_inflightContext = std::make_unique<VKInflightContext>(*m_ctx);
+		if (!m_inflightContext->InitInflight()) {
 			return false;
 		}
 
 		// Initialize ImGui.
 		ImGuiInitialize(
-			window,
-			m_vkInstance,
-			m_vkPhysicalDevice,
+			m_window,
+			m_ctx->GetInstance(),
+			m_ctx->GetPhysicalDevice(),
 			m_vkDevice,
 			m_vkQueueFamilyIdx,
 			m_vkQueue,
-			m_swapchainContext.GetSwapchainImageNum(),
-			m_swapchainContext.GetSwapchainRenderPass());
+			m_swapchainContext->GetSwapchainImageNum(),
+			m_swapchainContext->GetSwapchainRenderPass());
 
 		// Create command pool.
 		{
@@ -59,11 +71,11 @@ private:
 				.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
 				.queueFamilyIndex = m_vkQueueFamilyIdx,
 			};
-			VKCall(vkCreateCommandPool(m_vkDevice, &vkCmdPoolCInfo, m_vkAllocator, &m_vkCmdPool));
+			VKCall(vkCreateCommandPool(m_vkDevice, &vkCmdPoolCInfo, nullptr, &m_vkCmdPool));
 		}
 
 		// Create command buffer.
-		uint32_t inflightFrameNum = m_inflightContext.GetInflightFrameNum();
+		uint32_t inflightFrameNum = m_inflightContext->GetInflightFrameNum();
 		m_vkCmdBufs.resize(inflightFrameNum);
 		{
 			VkCommandBufferAllocateInfo vkCmdBufAllocInfo = {
@@ -76,11 +88,19 @@ private:
 		}
 
 		// Create pipeline.
-		std::string vertShaderPath = "shaders/test.vert";
-		std::string fragShaderPath = "shaders/test.frag";
-		if (!m_vkGraphicsPipeline.CreatePipeline(m_swapchainContext.GetSwapchainRenderPass(), vertShaderPath, fragShaderPath)) {
+		//std::string vertShaderPath = "shaders/test.vert";
+		//std::string fragShaderPath = "shaders/test.frag";
+		//m_vkGraphicsPipeline = std::make_unique<TestGraphicsPipeline>(*m_ctx, "TestGraphicsPipeline");
+		//if (!m_vkGraphicsPipeline->CreateGraphicsPipeline(m_swapchainContext->GetSwapchainRenderPass(), 0)) {
+		//	return false;
+		//}
+
+		if (!VKCreateGraphicsPipelineTest(m_ctx->GetDevice(), m_swapchainContext->GetSwapchainRenderPass(), 0, m_vkGraphicsPipeline)) {
 			return false;
 		}
+
+		//VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+		//VKCreateGraphicsPipelineTest(m_vkDevice, graphicsPipeline);
 
 		return true;
 	}
@@ -98,7 +118,7 @@ private:
 		SDL_SetWindowTitle(m_window, ss.str().c_str());
 
 		// Wait for the previous frame to finish.
-		if (!m_inflightContext.WaitForInflightFrameFence()) {
+		if (!m_inflightContext->WaitForInflightFrameFence()) {
 			return;
 		}
 
@@ -106,10 +126,10 @@ private:
 		ImGuiBeginFrame();
 		ImGui::ShowDemoWindow();
 
-		uint32_t inflightFrameIdx = m_inflightContext.GetInflightFrameIdx();
+		uint32_t inflightFrameIdx = m_inflightContext->GetInflightFrameIdx();
 		VkCommandBuffer cmdBuf = m_vkCmdBufs[inflightFrameIdx];
 
-		m_swapchainContext.AcquireNextSwapchainImage(m_inflightContext.GetImageAvailableSemaphore(), UINT64_MAX);
+		m_swapchainContext->AcquireNextSwapchainImage(m_inflightContext->GetImageAvailableSemaphore(), UINT64_MAX);
 
 		// Do rendering.
 		VKCall(vkResetCommandBuffer(cmdBuf, 0));
@@ -121,7 +141,7 @@ private:
 		VKCall(vkBeginCommandBuffer(cmdBuf, &cmdBufBeginInfo));
 
 		// Set viewport and scissor.
-		VkRect2D swapchainRect = m_swapchainContext.GetSwapchainRect();
+		VkRect2D swapchainRect = m_swapchainContext->GetSwapchainRect();
 		VkViewport viewport = { 0, 0, (float)swapchainRect.extent.width, (float)swapchainRect.extent.height, 0.0f, 1.0f };
 		vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
 		vkCmdSetScissor(cmdBuf, 0, 1, &swapchainRect);
@@ -129,9 +149,9 @@ private:
 		VkClearValue clearValue = { VkClearColorValue{ 0.1f, 0.0f, 0.0f, 1.0f } };
 		VkRenderPassBeginInfo renderPassBeginInfo = {
 			.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-			.renderPass = m_swapchainContext.GetSwapchainRenderPass(),
-			.framebuffer = m_swapchainContext.GetSwapchainFramebuffer(),
-			.renderArea = m_swapchainContext.GetSwapchainRect(),
+			.renderPass = m_swapchainContext->GetSwapchainRenderPass(),
+			.framebuffer = m_swapchainContext->GetSwapchainFramebuffer(),
+			.renderArea = m_swapchainContext->GetSwapchainRect(),
 			.clearValueCount = 1,
 			.pClearValues = &clearValue,
 		};
@@ -154,100 +174,86 @@ private:
 		VkSubmitInfo submitInfo = {
 			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
 			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &m_inflightContext.GetImageAvailableSemaphore(),
+			.pWaitSemaphores = &m_inflightContext->GetImageAvailableSemaphore(),
 			.pWaitDstStageMask = waitStages,
 			.commandBufferCount = (uint32_t)1,
 			.pCommandBuffers = &cmdBuf,
 			.signalSemaphoreCount = 1,
-			.pSignalSemaphores = &m_inflightContext.GetRenderFinishedSemaphore(),
+			.pSignalSemaphores = &m_inflightContext->GetRenderFinishedSemaphore(),
 		};
-		VKCall(vkQueueSubmit(m_vkQueue, 1, &submitInfo, m_inflightContext.GetInflightFrameFence()));
+		VKCall(vkQueueSubmit(m_vkQueue, 1, &submitInfo, m_inflightContext->GetInflightFrameFence()));
 
 		// Present.
 		VkPresentInfoKHR presentInfo = {
 			.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
 			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &m_inflightContext.GetRenderFinishedSemaphore(),
+			.pWaitSemaphores = &m_inflightContext->GetRenderFinishedSemaphore(),
 			.swapchainCount = 1,
-			.pSwapchains = &m_swapchainContext.GetSwapchain(),
-			.pImageIndices = &m_swapchainContext.GetSwapchainImageIdx(),
+			.pSwapchains = &m_swapchainContext->GetSwapchain(),
+			.pImageIndices = &m_swapchainContext->GetSwapchainImageIdx(),
 		};
 		vkQueuePresentKHR(m_vkQueue, &presentInfo);
 
-		m_inflightContext.NextFrame();
+		m_inflightContext->NextFrame();
 	}
 
 	virtual bool Shutdown() override
 	{
-		vkDeviceWaitIdle(m_vkDevice);
-
-		m_vkGraphicsPipeline.~VKGraphicsPipeline();
+		if (m_vkDevice) {
+			vkDeviceWaitIdle(m_vkDevice);
+		}
 
 		if (m_vkCmdPool) {
-			vkDestroyCommandPool(m_vkDevice, m_vkCmdPool, m_vkAllocator);
+			vkDestroyCommandPool(m_vkDevice, m_vkCmdPool, nullptr);
 		}
 
 		ImGuiShutdown();
 
-		m_inflightContext.~VKInflightContext();
-		m_swapchainContext.~VKSwapchainContext();
+		m_vkQueue = VK_NULL_HANDLE;
 
-		if (m_vkQueue != VK_NULL_HANDLE) {
-			m_vkQueue = VK_NULL_HANDLE;
-		}
+		vkDestroyPipeline(m_vkDevice, m_vkGraphicsPipeline, nullptr);
 
-		if (m_vkDevice != VK_NULL_HANDLE) {
-			vkDestroyDevice(m_vkDevice, m_vkAllocator);
-			m_vkDevice = VK_NULL_HANDLE;
-		}
+		//m_vkGraphicsPipeline.reset();
+		m_swapchainContext.reset();
+		m_inflightContext.reset();
 
-		if (m_vkPhysicalDevice != VK_NULL_HANDLE) {
-			m_vkPhysicalDevice = VK_NULL_HANDLE;
-		}
-
-		if (m_vkSurface != VK_NULL_HANDLE) {
-			vkDestroySurfaceKHR(m_vkInstance, m_vkSurface, m_vkAllocator);
-			m_vkSurface = VK_NULL_HANDLE;
-		}
-
-		if (m_vkInstance) {
-			vkDestroyInstance(m_vkInstance, m_vkAllocator);
-			m_vkInstance = VK_NULL_HANDLE;
-		}
+		m_ctx.reset();
 
 		return true;
 	}
 
 private:
+	// VkAllocationCallbacks* m_vkAllocator = nullptr;
+	//uint32_t m_rtWidth = 0, m_rtHeight = 0;
+	//VkInstance m_vkInstance = VK_NULL_HANDLE;
+	//VkPhysicalDevice m_vkPhysicalDevice = VK_NULL_HANDLE;
+	// VkSurfaceKHR m_vkSurface = VK_NULL_HANDLE;
+
 	SDL_Window* m_window = nullptr;
-
-	VkAllocationCallbacks* m_vkAllocator = nullptr;
-
-	uint32_t m_rtWidth = 0, m_rtHeight = 0;
-	VkInstance m_vkInstance = VK_NULL_HANDLE;
 	VkSurfaceKHR m_vkSurface = VK_NULL_HANDLE;
-	VkPhysicalDevice m_vkPhysicalDevice = VK_NULL_HANDLE;
+
+	std::unique_ptr<VKDeviceContext> m_ctx;
 
 	VkDevice m_vkDevice = VK_NULL_HANDLE;
 	uint32_t m_vkQueueFamilyIdx = (uint32_t)-1;
 	VkQueue m_vkQueue = VK_NULL_HANDLE;
 
-	VKDeviceContext m_vkDeviceContext = { m_vkInstance, m_vkPhysicalDevice, m_vkDevice, "DeviceContext"};
-
-	VKSwapchainContext m_swapchainContext = { m_vkDeviceContext };
-	VKInflightContext m_inflightContext = { m_vkDeviceContext };
+	std::unique_ptr<VKSwapchainContext> m_swapchainContext;
+	std::unique_ptr<VKInflightContext> m_inflightContext;
 
 	VkCommandPool m_vkCmdPool = VK_NULL_HANDLE;
 	std::vector<VkCommandBuffer> m_vkCmdBufs;
 
-	VKGraphicsPipeline m_vkGraphicsPipeline = { m_vkDeviceContext, "GraphicsPipeline" };
-
+	//std::unique_ptr<TestGraphicsPipeline> m_vkGraphicsPipeline;
+	VkPipeline m_vkGraphicsPipeline = VK_NULL_HANDLE;
 };
 
 int main(int argc, char** argv)
 {
+	//RunSingleVkDeviceSDLApp(1280, 800, std::make_unique<VKCapViewerApp>());
+	
 	VKCapViewerApp app;
-	app.Run();
+	app.Run(1280, 800);
 
 	return 0;
 }

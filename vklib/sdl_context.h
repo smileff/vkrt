@@ -11,22 +11,40 @@
 #include "SDL2/SDL.h"
 #include "SDL2/SDL_vulkan.h"
 
+// Hide the SDL context init/shutdown, and SDLWindows manangement.
 class SDLContext
 {
 public:
 	virtual ~SDLContext();
 
-	bool Run();
+	//bool Init(int winWidth, int winHeight);
+	//SDL_Window* GetSDLWindow() { return m_mainWin; }
+	//VkSurfaceKHR GetVkSurface() { return m_vkSurface; }
+	//VkInstance GetVkInstance() { return m_vkInstance; }
 
-	virtual bool Initialize(SDL_Window*, VkInstance, VkSurfaceKHR) { return true; }
+	virtual bool Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, const VkSurfaceKHR& surf) { return true; }
 	virtual void HandleInput(SDL_Event& event) {}
 	virtual void RunOneFrame(double frameSeconds, double FPS) {}
 	virtual bool Shutdown() { return true; }
+
+	bool Run(int winWidth, int winHeight);
+
 private:
-	int m_winWidth = 1280;
-	int m_winHeight = 800;
  	SDL_Window *m_mainWin = nullptr;
-	FPSCounter m_fpsCounter;
+	VkInstance m_vkInstance = VK_NULL_HANDLE;
+	VkSurfaceKHR m_vkSurface = VK_NULL_HANDLE;
 };
+
+// App works on one physial device.
+//class SDLApp
+//{
+//public:
+//	virtual bool Initialize(SDL_Window* sdlWin, const VkSurfaceKHR& surf, const VKDeviceContext& vkDeviceCtx) { return true; }
+//	virtual void HandleInput(SDL_Event& event) {}
+//	virtual void RunOneFrame(double frameSeconds, double FPS) {}
+//	virtual bool Shutdown() { return true; }
+//};
+//
+//bool RunSingleVkDeviceSDLApp(int winWidth, int winHeight, std::unique_ptr<SDLApp> app);
 
 #endif
