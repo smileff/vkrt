@@ -22,6 +22,8 @@
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_vulkan.h"
 
+#include "vklib.h"
+
 static const VkAllocationCallbacks* g_vkAllocator = nullptr;
 
 VkResult g_vkResult = VK_RESULT_MAX_ENUM;
@@ -261,9 +263,18 @@ void PrintSurfaceCapabilities(const char* surfName, VkPhysicalDevice vkPhysicalD
 			std::cout << "\t" << flagStr << std::endl;
 		}
 	}
+
+	std::cout << std::endl;
 }
 
-void PrintPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice vkPhysicalDevice)
+void VKPrintPhysicalDeviceName(VkPhysicalDevice vkPhysicalDevice)
+{
+	VkPhysicalDeviceProperties vkPhysicalDeviceProps;
+	vkGetPhysicalDeviceProperties(vkPhysicalDevice, &vkPhysicalDeviceProps);
+	std::cout << vkPhysicalDeviceProps.deviceName << std::endl;
+}
+
+void VKPrintPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice vkPhysicalDevice)
 {
 	uint32_t queueFamilyPropCnt;
 	vkGetPhysicalDeviceQueueFamilyProperties(vkPhysicalDevice, &queueFamilyPropCnt, nullptr);
@@ -288,10 +299,14 @@ void PrintPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice vkPhysicalDevice)
 
 		std::cout << "\tminImageTransferGranularity: " << props.minImageTransferGranularity.width << " * " << props.minImageTransferGranularity.height << " * " << props.minImageTransferGranularity.depth << std::endl;
 	}
+	std::cout << std::endl;
 }
 
-void VKPrintPhysicalDeviceFeatures(const VkPhysicalDeviceFeatures& vkPhysicalDeviceFeatures)
+void VKPrintPhysicalDeviceFeatures(VkPhysicalDevice vkPhysicalDevice)
 {
+	VkPhysicalDeviceFeatures vkPhysicalDeviceFeatures;
+	vkGetPhysicalDeviceFeatures(vkPhysicalDevice, &vkPhysicalDeviceFeatures);
+
 	std::cout << "Physical device features:" << std::endl;
 	//std::cout << "--------------------------------" << std::endl;
 	std::cout << "\trobustBufferAccess: " << (vkPhysicalDeviceFeatures.robustBufferAccess ? "Yes" : "NO") << std::endl;
@@ -349,6 +364,7 @@ void VKPrintPhysicalDeviceFeatures(const VkPhysicalDeviceFeatures& vkPhysicalDev
 	std::cout << "\tsparseResidencyAliased: " << (vkPhysicalDeviceFeatures.sparseResidencyAliased ? "Yes" : "NO") << std::endl;
 	std::cout << "\tvariableMultisampleRate: " << (vkPhysicalDeviceFeatures.variableMultisampleRate ? "Yes" : "NO") << std::endl;
 	std::cout << "\tinheritedQueries: " << (vkPhysicalDeviceFeatures.inheritedQueries ? "Yes" : "NO") << std::endl;
+	std::cout << std::endl;
 }
 
 
@@ -414,7 +430,7 @@ bool PickSurfaceFormat(VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSurf, V
 }
 
 int main(int argc, char** argv)
-{
+{	
 	// Initialize SDL
 	SDL_Init(SDL_INIT_EVERYTHING);
 
@@ -451,15 +467,6 @@ int main(int argc, char** argv)
 		return -1;
 	}
 
-	//// Create multiple instances.
-	//std::vector<VkInstance> instances(1000);
-	//for (int i = 0; i < (int)instances.size(); ++i) {
-	//	std::cout << "Creating the " << i << "th instance." << std::endl;
-	//	if (!VKCreateInstance((uint32_t)reqVkInstExts.size(), reqVkInstExts.data(), &instances[i])) {
-	//		return -1;
-	//	}
-	//}
-
 	// Register debug report callback.
 	// RegisterDebugReportCallback(vkInst);
 
@@ -470,19 +477,10 @@ int main(int argc, char** argv)
 		return -1;
 	}
 
-	// Print the name of the selected physical device.
-	VkPhysicalDeviceProperties vkPhysicalDeviceProps;
-	vkGetPhysicalDeviceProperties(vkPhysicalDevice, &vkPhysicalDeviceProps);
-	std::cout << vkPhysicalDeviceProps.deviceName << std::endl;
-
-	// Print physical device properties.
-	PrintPhysicalDeviceQueueFamilyProperties(vkPhysicalDevice);
-
-	// Print the physical device features
-	VkPhysicalDeviceFeatures vkPhysicalDeviceFeatures;
-	vkGetPhysicalDeviceFeatures(vkPhysicalDevice, &vkPhysicalDeviceFeatures);
-	VKPrintPhysicalDeviceFeatures(vkPhysicalDeviceFeatures);
-	std::cout << std::endl;
+	// Print some device info.
+	VKPrintPhysicalDeviceName(vkPhysicalDevice);
+	VKPrintPhysicalDeviceQueueFamilyProperties(vkPhysicalDevice);		
+	VKPrintPhysicalDeviceFeatures(vkPhysicalDevice);	
 
 	// Create vulkan logical device.
 	VkDevice vkDevice = VK_NULL_HANDLE;
@@ -494,22 +492,7 @@ int main(int argc, char** argv)
 	VkQueue vkQueue = VK_NULL_HANDLE;
 	vkGetDeviceQueue(vkDevice, vkQueueFamilyIdx, 0, &vkQueue);
 
-	//std::vector<VkDevice> devices(10);
-	//for (int i = 0; i < (int)devices.size(); ++i) {
-	//	std::cout << "Creating the " << i << "th device." << std::endl;
-	//	if (!VKCreateDevice(vkPhysicalDevice, vkQueueFamilyIdx, 1, &devices[i])) {
-	//		return -1;
-	//	}
-	//}
-
-	//// Get multiple device queues.
-	//std::vector<VkQueue> queues(1000);
-	//for (int i = 0; i < (int)queues.size(); ++i) {
-	//	std::cout << "Getting the " << i << "th queue." << std::endl;
-	//	vkGetDeviceQueue(devices[i], vkQueueFamilyIdx, 0, &queues[i]);
-	//}
-
-	// Create a command pool.
+	// Create a command pool for the got queue.
 	VkCommandPoolCreateInfo vkCmdPoolCInfo = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 		.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
@@ -534,7 +517,7 @@ int main(int argc, char** argv)
 	if (support != VK_TRUE) {
 		fprintf(stdout, "Don't support surface.");
 		return -1;
-	}
+	}	
 
 	// Get all supported surface formats.
 	VkSurfaceFormatKHR vkSurfFmt;
@@ -546,10 +529,9 @@ int main(int argc, char** argv)
 	}
 
 	// Print the capabilities of this surface.	
-	PrintSurfaceCapabilities(SDL_GetWindowTitle(win), vkPhysicalDevice, vkSurf);
-	std::cout << std::endl;
+	PrintSurfaceCapabilities(SDL_GetWindowTitle(win), vkPhysicalDevice, vkSurf);	
 
-	// Create vulkan swap chain
+	// Create vulkan swap chain.
 	VkSwapchainCreateInfoKHR swapchainCInfo = {
 		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
 		.surface = vkSurf,
@@ -569,6 +551,56 @@ int main(int argc, char** argv)
 		VKPrintLastError();
 		return -1;
 	}
+
+	// Get swap chain images.
+	uint32_t swapchainImgCnt;
+	VKCall(vkGetSwapchainImagesKHR(vkDevice, vkSwapchain, &swapchainImgCnt, nullptr));
+	std::vector<VkImage> vkSwapchainImages(swapchainImgCnt);
+	if (VKFail(vkGetSwapchainImagesKHR(vkDevice, vkSwapchain, &swapchainImgCnt, vkSwapchainImages.data()))) {
+		VKPrintLastError();
+		return -1;
+	}
+
+	// Create image view for each swapchain image.
+	std::vector<VkImageView> vkSwapchainImageViews(swapchainImgCnt);
+	for (uint32_t imgIdx = 0; imgIdx < swapchainImgCnt; ++imgIdx) {
+		VkImageViewCreateInfo imgViewCInfo = {
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.image = vkSwapchainImages[imgIdx],
+			.viewType = VK_IMAGE_VIEW_TYPE_2D,
+			.format = vkSurfFmt.format,
+			.subresourceRange = {
+				.aspectMask{ VK_IMAGE_ASPECT_COLOR_BIT },
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1,
+			},
+		};
+		VKCall(vkCreateImageView(vkDevice, &imgViewCInfo, g_vkAllocator, &vkSwapchainImageViews[imgIdx]));
+	}
+
+	const int inflightFrameCnt = 3;
+
+	// Create a semaphore and fence for synchronization.
+	std::vector<VkSemaphore> imageAvailableSemaphores(inflightFrameCnt);
+	std::vector<VkSemaphore> renderFinishedSemaphores(inflightFrameCnt);
+	std::vector<VkFence> renderFinishedFences(inflightFrameCnt);
+	for (int inflightIdx = 0; inflightIdx < inflightFrameCnt; ++inflightIdx) {
+		VkSemaphoreCreateInfo imageAvailableSemaphoreCInfo = {
+			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+		};
+		VKCall(vkCreateSemaphore(vkDevice, &imageAvailableSemaphoreCInfo, g_vkAllocator, &imageAvailableSemaphores[inflightIdx]));
+		VKCall(vkCreateSemaphore(vkDevice, &imageAvailableSemaphoreCInfo, g_vkAllocator, &renderFinishedSemaphores[inflightIdx]));
+
+		VkFenceCreateInfo renderFinishedFenceCInfo = {
+			.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+			.flags = VK_FENCE_CREATE_SIGNALED_BIT,  // Initially signaled.
+		};
+		VKCall(vkCreateFence(vkDevice, &renderFinishedFenceCInfo, g_vkAllocator, &renderFinishedFences[inflightIdx]));
+	}
+
+	// Then intiailze for concrete rendering.
 
 	// Create a renderpass.
 	VkRenderPass vkRenderPass = VK_NULL_HANDLE;
@@ -609,34 +641,6 @@ int main(int argc, char** argv)
 	vkRenderPassCInfo.pDependencies = &dependency;
 	VKCall(vkCreateRenderPass(vkDevice, &vkRenderPassCInfo, g_vkAllocator, &vkRenderPass));
 
-	// Get swap chain images.
-	uint32_t swapchainImgCnt;
-	VKCall(vkGetSwapchainImagesKHR(vkDevice, vkSwapchain, &swapchainImgCnt, nullptr));
-	std::vector<VkImage> vkSwapchainImages(swapchainImgCnt);
-	if (VKFail(vkGetSwapchainImagesKHR(vkDevice, vkSwapchain, &swapchainImgCnt, vkSwapchainImages.data()))) {
-		VKPrintLastError();
-		return -1;
-	}
-
-	// Create image view for each swapchain image.
-	std::vector<VkImageView> vkSwapchainImageViews(swapchainImgCnt);
-	for (uint32_t imgIdx = 0; imgIdx < swapchainImgCnt; ++imgIdx) {
-		VkImageViewCreateInfo imgViewCInfo = {
-			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-			.image = vkSwapchainImages[imgIdx],
-			.viewType = VK_IMAGE_VIEW_TYPE_2D,
-			.format = vkSurfFmt.format,
-			.subresourceRange = {
-				.aspectMask{ VK_IMAGE_ASPECT_COLOR_BIT },
-				.baseMipLevel = 0,
-				.levelCount = 1,
-				.baseArrayLayer = 0,
-				.layerCount = 1,
-			},
-		};
-		VKCall(vkCreateImageView(vkDevice, &imgViewCInfo, g_vkAllocator, &vkSwapchainImageViews[imgIdx]));
-	}
-
 	// Create framebuffers.
 	std::vector<VkFramebuffer> vkFramebuffers(swapchainImgCnt);
 	for (uint32_t imgIdx = 0; imgIdx < swapchainImgCnt; ++imgIdx) {
@@ -662,26 +666,6 @@ int main(int argc, char** argv)
 				.commandBufferCount = swapchainImgCnt,
 		};
 		VKCall(vkAllocateCommandBuffers(vkDevice, &cmdBufAllocInfo, imageCmdBufs.data()));
-	}
-
-	const int inflightFrameCnt = 3;
-
-	// Create a semaphore and fence for synchronization.
-	std::vector<VkSemaphore> imageAvailableSemaphores(inflightFrameCnt);
-	std::vector<VkSemaphore> renderFinishedSemaphores(inflightFrameCnt);
-	std::vector<VkFence> renderFinishedFences(inflightFrameCnt);
-	for (int inflightIdx = 0; inflightIdx < inflightFrameCnt; ++inflightIdx) {
-		VkSemaphoreCreateInfo imageAvailableSemaphoreCInfo = {
-			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-		};
-		VKCall(vkCreateSemaphore(vkDevice, &imageAvailableSemaphoreCInfo, g_vkAllocator, &imageAvailableSemaphores[inflightIdx]));
-		VKCall(vkCreateSemaphore(vkDevice, &imageAvailableSemaphoreCInfo, g_vkAllocator, &renderFinishedSemaphores[inflightIdx]));
-
-		VkFenceCreateInfo renderFinishedFenceCInfo = {
-			.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-			.flags = VK_FENCE_CREATE_SIGNALED_BIT,  // Initially signaled.
-		};
-		VKCall(vkCreateFence(vkDevice, &renderFinishedFenceCInfo, g_vkAllocator, &renderFinishedFences[inflightIdx]));
 	}
 
 	// Initialize imgUI
@@ -751,7 +735,6 @@ int main(int argc, char** argv)
 
 		// ImGui handles events.
 		
-
 		// ImGui start new frame.
 		ImGui_ImplSDL2_NewFrame();
 		ImGui_ImplVulkan_NewFrame();

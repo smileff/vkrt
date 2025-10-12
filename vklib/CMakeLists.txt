@@ -23,8 +23,10 @@ source_group("imgui" FILES ${IMGUI_SOURCES})
 
 list(APPEND SOURCES
     vklib.h
-    vk_function.cpp
-    vk_function.h
+    vklib_function.cpp
+    vklib_function.h
+    vklib_context.cpp
+    vklib_context.h
     imgui_function.cpp
     imgui_function.h
     fps_counter.cpp
@@ -33,6 +35,8 @@ list(APPEND SOURCES
     sdl_context.h
     vma_usage.cpp
     vma_usage.h
+    vklib_buffer_alloc.cpp
+    vklib_buffer_alloc.h
 )
 add_library(vklib STATIC ${SOURCES} ${IMGUI_SOURCES})
 
@@ -41,6 +45,7 @@ list(APPEND EXTRA_INCLUDE_PATH
     $ENV{VULKAN_SDK}/Include/SDL2
     $ENV{LIBS_ROOT}/imgui
     $ENV{LIBS_ROOT}/imgui/backends
+    $ENV{LIBS_ROOT}/eigen
 )
 target_include_directories(${PROJECT_NAME} PUBLIC ${EXTRA_INCLUDE_PATH})
 

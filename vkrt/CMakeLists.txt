@@ -25,35 +25,33 @@ list(APPEND IMGUI_SOURCES
 source_group("imgui" FILES ${IMGUI_SOURCES})
 
 list(APPEND SOURCES
-    main.cpp
+    vkrt_main.cpp
 )
 
 add_executable(vkrt ${SOURCES} ${IMGUI_SOURCES})
 
-list(APPEND EXTRA_INCLUDE_PATH
-    $ENV{VULKAN_SDK}/Include
-    $ENV{VULKAN_SDK}/Include/SDL2
-    $ENV{LIBS_ROOT}/imgui
-    $ENV{LIBS_ROOT}/imgui/backends
-)
-target_include_directories(vkrt PUBLIC ${EXTRA_INCLUDE_PATH})
+#list(APPEND EXTRA_INCLUDE_PATH
+#    $ENV{VULKAN_SDK}/Include
+#    $ENV{VULKAN_SDK}/Include/SDL2
+#    $ENV{LIBS_ROOT}/imgui
+#    $ENV{LIBS_ROOT}/imgui/backends
+#)
+#target_include_directories(vkrt PUBLIC ${EXTRA_INCLUDE_PATH})
 
-# list(APPEND EXTRA_LIB_PATH
-#     $ENV{LIBS_ROOT}/glfw/lib-vc2019
-# )
-# target_link_directories(vkrt PUBLIC ${EXTRA_LIB_PATH})
+#list(APPEND EXTRA_LIBS    
+#    $ENV{VULKAN_SDK}/Lib/vulkan-1.lib
+#    # Link SDL2d.lib if in debug mode, otherwise SDL2.lib
+#    #$<$<CONFIG:Debug>:$ENV{VULKAN_SDK}/Lib/SDL2d.lib>
+#    #$<$<NOT:$<CONFIG:Debug>>:$ENV{VULKAN_SDK}/Lib/SDL2.lib>
+#    #$<$<CONFIG:Debug>:$ENV{VULKAN_SDK}/Lib/SDL2maind.lib>
+#    #$<$<NOT:$<CONFIG:Debug>>:$ENV{VULKAN_SDK}/Lib/SDL2main.lib>
+#    $ENV{VULKAN_SDK}/Lib/SDL2.lib
+#    $ENV{VULKAN_SDK}/Lib/SDL2main.lib
+#)
+#target_link_libraries(vkrt PUBLIC ${EXTRA_LIBS})
 
-list(APPEND EXTRA_LIBS    
-    $ENV{VULKAN_SDK}/Lib/vulkan-1.lib
-    # Link SDL2d.lib if in debug mode, otherwise SDL2.lib
-    #$<$<CONFIG:Debug>:$ENV{VULKAN_SDK}/Lib/SDL2d.lib>
-    #$<$<NOT:$<CONFIG:Debug>>:$ENV{VULKAN_SDK}/Lib/SDL2.lib>
-    #$<$<CONFIG:Debug>:$ENV{VULKAN_SDK}/Lib/SDL2maind.lib>
-    #$<$<NOT:$<CONFIG:Debug>>:$ENV{VULKAN_SDK}/Lib/SDL2main.lib>
-    $ENV{VULKAN_SDK}/Lib/SDL2.lib
-    $ENV{VULKAN_SDK}/Lib/SDL2main.lib
-)
-target_link_libraries(vkrt PUBLIC ${EXTRA_LIBS})
+target_include_directories(${PROJECT_NAME} PRIVATE "../vklib")
+target_link_libraries(${PROJECT_NAME} PRIVATE vklib)
 
 # Ends here.
 

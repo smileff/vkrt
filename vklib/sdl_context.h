@@ -3,32 +3,26 @@
 
 #include <exception>
 #include <vector>
-
-#include "vk_function.h"
-#include "imgui_function.h"
-#include "fps_counter.h"
-
+#include "vulkan/vulkan.h"
 #include "SDL2/SDL.h"
 #include "SDL2/SDL_vulkan.h"
 
-// Hide the SDL context init/shutdown, and SDLWindows manangement.
-class SDLContext
+// SDLVulkanApplication, the framework of a SDL application using vulkan. Encapsulate:
+// * SDL library initializtion, window creation.
+// * The vulkan instance creation.
+class SDLVulkanApplication
 {
 public:
-	virtual ~SDLContext();
+	// Call this function to run the applicaiton.
+	bool Run(int winWidth, int winHeight);
 
-	//bool Init(int winWidth, int winHeight);
-	//SDL_Window* GetSDLWindow() { return m_mainWin; }
-	//VkSurfaceKHR GetVkSurface() { return m_vkSurface; }
-	//VkInstance GetVkInstance() { return m_vkInstance; }
-
+	// Override the following virtual functions.
 	virtual bool Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, const VkSurfaceKHR& surf) { return true; }
 	virtual void HandleInput(SDL_Event& event) {}
 	virtual void RunOneFrame(double frameSeconds, double FPS) {}
 	virtual bool Shutdown() { return true; }
 
-	bool Run(int winWidth, int winHeight);
-
+	virtual ~SDLVulkanApplication();
 private:
  	SDL_Window *m_mainWin = nullptr;
 	VkInstance m_vkInstance = VK_NULL_HANDLE;

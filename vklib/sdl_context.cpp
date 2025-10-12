@@ -2,8 +2,11 @@
 #include <vector>
 #include <cassert>
 #include "sdl_context.h"
+#include "vklib_function.h"
+#include "imgui_function.h"
+#include "fps_counter.h"
 
-SDLContext::~SDLContext()
+SDLVulkanApplication::~SDLVulkanApplication()
 {
 	if (m_vkSurface) {
 		vkDestroySurfaceKHR(m_vkInstance, m_vkSurface, nullptr);
@@ -65,7 +68,7 @@ SDLContext::~SDLContext()
 //	return true;
 //}
 
-bool SDLContext::Run(int winWidth, int winHeight)
+bool SDLVulkanApplication::Run(int winWidth, int winHeight)
 {
 	// Initialize SDL.
 	if (SDL_Init(SDL_INIT_EVERYTHING) != 0) {

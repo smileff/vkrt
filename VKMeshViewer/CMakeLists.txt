@@ -1,10 +1,14 @@
 cmake_minimum_required(VERSION 3.10.0)
-project(VKCapViewer VERSION 0.1.0)
+project(VKMeshViewer VERSION 0.1.0)
 
 set(CMAKE_CXX_STANDARD 20)
 
 list(APPEND SOURCES
-    VKCapViewerMain.cpp
+    VKMeshViewerMain.cpp
+    OBJMesh.cpp
+    OBJMesh.h
+    scene.cpp
+    scene.h
 )
 
 list(APPEND SHADER_SOURCES
