@@ -17,7 +17,7 @@ public:
 	bool Run(int winWidth, int winHeight);
 
 	// Override the following virtual functions.
-	virtual bool Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, const VkSurfaceKHR& surf) { return true; }
+	virtual bool Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, const VkSurfaceKHR& vkSurf) { return true; }
 	virtual void HandleInput(SDL_Event& event) {}
 	virtual void RunOneFrame(double frameSeconds, double FPS) {}
 	virtual bool Shutdown() { return true; }

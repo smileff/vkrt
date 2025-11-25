@@ -31,7 +31,26 @@ void VKSetDebugObjectName(VkDevice vkDevice, VkObjectType vkObjType, uint64_t vk
 	}
 }
 
-bool VKCreateInstance(VkInstance& vkInst, size_t instExtNum, const char** instExts, size_t enableLayerNum, const char** enableLayers, VkAllocationCallbacks* allocator)
+bool RegisterDebugReportCallback(VkInstance vkInst, PFN_vkDebugReportCallbackEXT vkDebugReportCallbackFunc, VkAllocationCallbacks* allocator)
+{
+	// Get the vkCreateDebugReportCallbackEXT function.
+	PFN_vkCreateDebugReportCallbackEXT vkCreateDebugReportCallbackEXT = (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(vkInst, "vkCreateDebugReportCallbackEXT");
+
+	// Register debug report callback.
+	VkDebugReportCallbackEXT vkDebugReportCallback = VK_NULL_HANDLE;
+	VkDebugReportCallbackCreateInfoEXT debugReportCallbackCInfo = {
+		.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,
+		.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT,
+		.pfnCallback = vkDebugReportCallbackFunc,
+	};
+	if (!VKSucceed(vkCreateDebugReportCallbackEXT(vkInst, &debugReportCallbackCInfo, allocator, &vkDebugReportCallback))) {
+		return false;
+	}
+
+	return true;
+}
+
+bool VKCreateInstance(std::span<const char*> instExts, std::span<const char*> enableLayers, VkAllocationCallbacks* allocator, VkInstance* vkInstResultPtr)
 {
 	// Specify version version by ApplicationInfo.
 	VkApplicationInfo appInfo = {
@@ -39,46 +58,37 @@ bool VKCreateInstance(VkInstance& vkInst, size_t instExtNum, const char** instEx
 		.apiVersion = VK_API_VERSION,
 	};
 
-	std::vector<const char*> instExts2(instExts, instExts + instExtNum);
+	std::vector<const char*> instExts2(instExts.begin(), instExts.end());
 	instExts2.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
 	// Create instance.
 	VkInstanceCreateInfo instCInfo = {
 		.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 		.pApplicationInfo = &appInfo,
-		.enabledLayerCount = (uint32_t)enableLayerNum,
-		.ppEnabledLayerNames = enableLayers,
+		.enabledLayerCount = (uint32_t)enableLayers.size(),
+		.ppEnabledLayerNames = enableLayers.data(),
 		.enabledExtensionCount = (uint32_t)instExts2.size(),
 		.ppEnabledExtensionNames = instExts2.data(),
 	};
 
-	if (!VKSucceed(vkCreateInstance(&instCInfo, allocator, &vkInst))) {
+	if (!VKSucceed(vkCreateInstance(&instCInfo, allocator, vkInstResultPtr))) {
 		return false;
-	}
-
-	// Get the SetDebugUtilsObjectName function.
-	if (!VKSetDebugUtilsObjectName) {
-		VKSetDebugUtilsObjectName = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetInstanceProcAddr(vkInst, "vkSetDebugUtilsObjectNameEXT");
-		if (!VKSetDebugUtilsObjectName) {
-			std::cerr << "VK_EXT_debug_utils is not available.\n";
-			return false;
-		}
 	}
 
 	return true;
 }
 
-bool VKPickPhysicalDeviceAndOneQueueFamily(VkInstance inst, VkSurfaceKHR surf, VkPhysicalDevice* toPickPhysDevice, uint32_t* toPickQueueFamilyIdx)
+bool VKPickSinglePhysicalDeviceAndQueueFamily(const VkInstance& vkInst, const VkSurfaceKHR& vkSurf, VkPhysicalDevice* vkPhysicalDeviceResult, uint32_t* vkQueueFamilyIdxResult)
 {
 	// Enumerate physical devices.
 	uint32_t vkPhysicalDeviceCnt;
-	VKCall(vkEnumeratePhysicalDevices(inst, &vkPhysicalDeviceCnt, nullptr));
+	VKCall(vkEnumeratePhysicalDevices(vkInst, &vkPhysicalDeviceCnt, nullptr));
 	std::vector<VkPhysicalDevice> vkPhysicalDevices(vkPhysicalDeviceCnt);
-	VKCall(vkEnumeratePhysicalDevices(inst, &vkPhysicalDeviceCnt, vkPhysicalDevices.data()));
+	VKCall(vkEnumeratePhysicalDevices(vkInst, &vkPhysicalDeviceCnt, vkPhysicalDevices.data()));
 
 	// Loop each physical device to select the suitable one; prefer discrete GPU.
-	*toPickPhysDevice = VK_NULL_HANDLE;
-	*toPickQueueFamilyIdx = (uint32_t)-1;
+	*vkPhysicalDeviceResult = VK_NULL_HANDLE;
+	*vkQueueFamilyIdxResult = (uint32_t)-1;
 	for (auto physicalDevice : vkPhysicalDevices)
 	{
 		// Get physical device property.
@@ -97,11 +107,13 @@ bool VKPickPhysicalDeviceAndOneQueueFamily(VkInstance inst, VkSurfaceKHR surf, V
 		while (queueFamilyIdx < queueFamilyPropCnt)
 		{
 			// Check if support the surface.
-			VkBool32 supportSurf = VK_FALSE;
-			VKCall(vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, queueFamilyIdx, surf, &supportSurf));
-			if (!supportSurf) {
-				++queueFamilyIdx;
-				continue;
+			if (vkSurf != VK_NULL_HANDLE) {
+				VkBool32 supportSurf = VK_FALSE;
+				VKCall(vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, queueFamilyIdx, vkSurf, &supportSurf));
+				if (!supportSurf) {
+					++queueFamilyIdx;
+					continue;
+				}
 			}
 
 			// Check if satisfy the required queue flags.
@@ -122,8 +134,8 @@ bool VKPickPhysicalDeviceAndOneQueueFamily(VkInstance inst, VkSurfaceKHR surf, V
 		}
 
 		//Found.
-		*toPickPhysDevice = physicalDevice;
-		*toPickQueueFamilyIdx = queueFamilyIdx;
+		*vkPhysicalDeviceResult = physicalDevice;
+		*vkQueueFamilyIdxResult = queueFamilyIdx;
 
 		// Prefer discrete device.
 		if (vkPhysicalDeviceProps.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
@@ -140,7 +152,7 @@ bool VKCreateDevice(
 	size_t queueCreateRequestCount, const VKDeviceQueueCreateRequest* queueCreateRequests,
 	size_t enableLayerCount, const char** enableLayerNames,
 	size_t enableExtensionCount, const char** enableExtensionNames,
-	const void* featureLinkedList, VkAllocationCallbacks* vkAllocator)
+	const void* featureLinkedList, const VkAllocationCallbacks* vkAllocator)
 {
 	size_t queueFamilyCnt = queueCreateRequestCount;
 	std::vector<VkDeviceQueueCreateInfo> deviceQueueCInfos(queueFamilyCnt);
@@ -167,6 +179,46 @@ bool VKCreateDevice(
 
 	vkDevice = VK_NULL_HANDLE;
 	if (!VKSucceed(vkCreateDevice(vkPhysicalDevice, &deviceCInfo, vkAllocator, &vkDevice))) {
+		return false;
+	}
+
+	return true;
+}
+
+bool VKCreateDevice(
+	VkPhysicalDevice vkPhysicalDevice, 
+	std::span<const VKDeviceQueueCreateRequest> queueCreateRequests, 
+	std::span<const char*> enableLayerNames, 
+	std::span<const char*> enableExtensionNames, 
+	VkAllocationCallbacks* vkAllocator,
+	VkDevice* vkDevicePtr)
+{
+	// Make the VkDeviceQueueCreateInfo array and VkDeviceCreateInfo.
+	size_t queueFamilyCnt = queueCreateRequests.size();
+	std::vector<VkDeviceQueueCreateInfo> deviceQueueCInfos(queueFamilyCnt);
+	for (size_t i = 0; i < queueFamilyCnt; ++i) {
+		const VKDeviceQueueCreateRequest& request = queueCreateRequests[i];
+		deviceQueueCInfos[i] = {
+			.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+			.queueFamilyIndex = request.QueueFamilyIdx,
+			.queueCount = request.QueueCount,
+			.pQueuePriorities = request.QueuePriorities.data(),
+		};
+	}
+
+	VkDeviceCreateInfo deviceCInfo = {
+		.sType{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO },
+		.pNext = nullptr,
+		.queueCreateInfoCount = (uint32_t)deviceQueueCInfos.size(),
+		.pQueueCreateInfos = deviceQueueCInfos.data(),
+		.enabledLayerCount = (uint32_t)enableLayerNames.size(),
+		.ppEnabledLayerNames = enableLayerNames.data(),
+		.enabledExtensionCount = (uint32_t)enableExtensionNames.size(),
+		.ppEnabledExtensionNames = enableExtensionNames.data(),
+	};
+
+	// Create the device.
+	if (!VKSucceed(vkCreateDevice(vkPhysicalDevice, &deviceCInfo, vkAllocator, vkDevicePtr))) {
 		return false;
 	}
 
@@ -227,7 +279,14 @@ void VKPrintSurfaceCapabilities(const char* surfName, VkPhysicalDevice vkPhysica
 	}
 }
 
-void VKPrintPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice vkPhysicalDevice)
+void VKPrintPhysicalDeviceName(const VkPhysicalDevice& vkPhysicalDevice)
+{
+	VkPhysicalDeviceProperties vkPhysicalDeviceProps;
+	vkGetPhysicalDeviceProperties(vkPhysicalDevice, &vkPhysicalDeviceProps);
+	std::cout << vkPhysicalDeviceProps.deviceName << std::endl;
+}
+
+void VKPrintPhysicalDeviceQueueFamilyProperties(const VkPhysicalDevice& vkPhysicalDevice)
 {
 	uint32_t queueFamilyPropCnt;
 	vkGetPhysicalDeviceQueueFamilyProperties(vkPhysicalDevice, &queueFamilyPropCnt, nullptr);
@@ -254,8 +313,11 @@ void VKPrintPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice vkPhysicalDevic
 	}
 }
 
-void VKPrintPhysicalDeviceFeatures(const VkPhysicalDeviceFeatures& vkPhysicalDeviceFeatures)
+void VKPrintPhysicalDeviceFeatures(const VkPhysicalDevice& vkPhysicalDevice)
 {
+	VkPhysicalDeviceFeatures vkPhysicalDeviceFeatures;
+	vkGetPhysicalDeviceFeatures(vkPhysicalDevice, &vkPhysicalDeviceFeatures);
+
 	std::cout << "Physical device features:" << std::endl;
 	//std::cout << "--------------------------------" << std::endl;
 	std::cout << "\trobustBufferAccess: " << (vkPhysicalDeviceFeatures.robustBufferAccess ? "Yes" : "NO") << std::endl;
@@ -315,7 +377,7 @@ void VKPrintPhysicalDeviceFeatures(const VkPhysicalDeviceFeatures& vkPhysicalDev
 	std::cout << "\tinheritedQueries: " << (vkPhysicalDeviceFeatures.inheritedQueries ? "Yes" : "NO") << std::endl;
 }
 
-bool VKPickSurfaceFormat(VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSurf, VkSurfaceFormatKHR& surfFmt)
+bool VKPickSurfaceFormat(VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSurf, VkSurfaceFormatKHR* vkSurfFmtResult)
 {
 	// Get all supported surface formats.
 	uint32_t supportedSurfFmtCnt = 0;
@@ -330,7 +392,7 @@ bool VKPickSurfaceFormat(VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSurf,
 			return fmt.format == toFindFmt.format && fmt.colorSpace == toFindFmt.colorSpace;
 		}) != supportedSurfFmts.end())
 	{
-		surfFmt = preferSurfFmt;
+		*vkSurfFmtResult = preferSurfFmt;
 		return true;
 	}
 
@@ -341,7 +403,7 @@ bool VKPickSurfaceFormat(VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSurf,
 			return fmt.format == toFindFmt.format && fmt.colorSpace == toFindFmt.colorSpace;
 		}) != supportedSurfFmts.end())
 	{
-		surfFmt = preferSurfFmt;
+		*vkSurfFmtResult = preferSurfFmt;
 		return true;
 	}
 
@@ -471,3 +533,49 @@ const VkPipelineDynamicStateCreateInfo g_DynamicStateCreateInfo_DynamicViewportS
 	.dynamicStateCount = (uint32_t)std::size(g_DynamicStates_Viewport_Scissor),
 	.pDynamicStates = g_DynamicStates_Viewport_Scissor,
 };
+
+
+
+
+// Destroy helper functions.
+
+// Destroy vulkan semaphore vector.
+void VKDestroySemaphoreVector(VkDevice device, std::vector<VkSemaphore>& semaphores, VkAllocationCallbacks* allocator)
+{
+	std::for_each(semaphores.begin(), semaphores.end(),
+		[device, allocator](VkSemaphore sema)
+		{
+			if (sema != VK_NULL_HANDLE) {
+				vkDestroySemaphore(device, sema, allocator);
+			}
+		}
+	);
+	semaphores.clear();
+}
+
+// Destroy vulkan fence vector.
+void VKDestroyFenceVector(VkDevice device, std::vector<VkFence>& fences, VkAllocationCallbacks* allocator)
+{
+	std::for_each(fences.begin(), fences.end(),
+		[device, allocator](VkFence fence)
+		{
+			if (fence != VK_NULL_HANDLE) {
+				vkDestroyFence(device, fence, allocator);
+			}
+		}
+	);
+	fences.clear();
+}
+
+void VKDestroyImageViewVector(VkDevice device, std::vector<VkImageView>& imageViews, VkAllocationCallbacks* allocator)
+{
+	std::for_each(imageViews.begin(), imageViews.end(),
+		[=](VkImageView imageView)
+		{
+			if (imageView != VK_NULL_HANDLE) {
+				vkDestroyImageView(device, imageView, allocator);
+			}
+		}
+	);
+	imageViews.clear();
+}

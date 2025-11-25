@@ -20,6 +20,7 @@
 #include "glm/glm.hpp"
 #include "sdl_context.h"
 
+#include "log.h"
 #include "vklib_function.h"
 #include "vklib_context.h"
 #include "imgui_function.h"

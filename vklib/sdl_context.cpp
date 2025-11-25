@@ -97,7 +97,7 @@ bool SDLVulkanApplication::Run(int winWidth, int winHeight)
 	};
 
 	// Create vulkan instance.
-	if (!VKCreateInstance(m_vkInstance, vkInstExts.size(), vkInstExts.data(), vkEnableLayers.size(), vkEnableLayers.data(), nullptr)) {
+	if (!VKCreateInstance(m_vkInstance, vkInstExts, vkEnableLayers, nullptr)) {
 		return false;
 	}
 

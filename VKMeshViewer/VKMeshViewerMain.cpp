@@ -379,7 +379,7 @@ bool VKMeshViewerApp::Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, c
 	// Pick physical device and queue family.
 	VkPhysicalDevice vkPhysicalDevice;
 	uint32_t vkQueueFamilyIdx;
-	if (!VKPickPhysicalDeviceAndOneQueueFamily(vkInst, vkSurf, &vkPhysicalDevice, &vkQueueFamilyIdx)) {
+	if (!VKPickSinglePhysicalDeviceAndQueueFamily(vkInst, vkSurf, &vkPhysicalDevice, &vkQueueFamilyIdx)) {
 		return false;
 	}
 
@@ -399,7 +399,7 @@ bool VKMeshViewerApp::Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, c
 
 	// Determine the main surface format.
 	VkSurfaceFormatKHR vkSwapchainSurfaceFormat;
-	if (!VKPickSurfaceFormat(m_ctx->GetPhysicalDevice(), m_vkSurface, vkSwapchainSurfaceFormat)) {
+	if (!VKPickSurfaceFormat(m_ctx->GetPhysicalDevice(), m_vkSurface, &vkSwapchainSurfaceFormat)) {
 		return false;
 	}
 

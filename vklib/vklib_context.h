@@ -13,33 +13,21 @@
 // VKContext, encapsule:
 // * context name.
 // * context object tree-hierarchy.
-class VKContext
-{
-public:
-	VKContext(const std::shared_ptr<VKContext>& parent, const char* ctxName);
-
-	const char* GetContextName() const;
-
-	VKContext* GetParentContext() const;
-private:
-	std::shared_ptr<VKContext> m_parentContext;
-	const char* m_contextName = nullptr;
-};
-
-// Encapsule the vulkan instance and physical device.
-class VKInstanceContext
-{
-public:
-	VKInstanceContext(const char* ctxName);
+//class VKContext
+//{
+//public:
+//	VKContext(const VKContext& parent, const char* ctxName);
+//
+//	const char* GetContextName() const;
+//
+//	VKContext* GetParentContext() const;
+//private:
+//	const VKContext m_parentContext;
+//	const char* m_contextName = nullptr;
+//};
 
 
-private:
-	VkInstance m_vkInstance = VK_NULL_HANDLE;
-	VkPhysicalDevice m_vkPhysicalDevice = VK_NULL_HANDLE;
-};
-
-// Concerns:
-// * Should support multiple queue?
+// Simple device context, contain only one queue, which can do all graphics, compute and transfer works.
 class VKDeviceContext
 {
 public:
@@ -57,15 +45,17 @@ public:
 	// Instance, PhysicalDevice, Device.
 	const VkInstance& GetInstance() const { return m_vkInstance; }	
 	const VkPhysicalDevice& GetPhysicalDevice() const { return m_vkPhysicalDevice; }
-	const VkDevice& GetDevice() const { return m_vkDevice; }
-	const VmaAllocator& GetVmaAllocator() const { return m_VmaAllocator; }
 
+	// 
+	const VkDevice& GetDevice() const { return m_vkDevice; }
 	// Get queue family idx.
 	size_t GetQueueFamilyCount() const;
 	uint32_t GetQueueFamilyIdx(uint32_t i) const;
 	// Get queue.
 	size_t GetQueueFamilyQueueCount(uint32_t i) const;
 	VkQueue GetQueueFamilyQueue(uint32_t i, uint32_t queueIdx) const;
+
+	const VmaAllocator& GetVmaAllocator() const { return m_VmaAllocator; }
 
 	// Global vk objects.
 	VkPipelineLayout GetGlobalEmptyPipelineLayout() const { return m_vkEmptyPipelineLayout; }
@@ -79,13 +69,14 @@ private:
 
 	const VkInstance m_vkInstance = VK_NULL_HANDLE;
 	const VkPhysicalDevice m_vkPhysicalDevice = VK_NULL_HANDLE;
-	VkDevice m_vkDevice = VK_NULL_HANDLE;
-	VmaAllocator m_VmaAllocator = VK_NULL_HANDLE;
 
-	// Queue family idxs and queues.
+	// Device and queues.
+	VkDevice m_vkDevice = VK_NULL_HANDLE;
 	std::vector<uint32_t> m_vkQueueFamilyIdxs;
 	std::vector<size_t> m_vkQueueFamilyQueueStartIdxs;
 	std::vector<VkQueue> m_vkQueues;
+
+	VmaAllocator m_VmaAllocator = VK_NULL_HANDLE;
 
 	VkPipelineVertexInputStateCreateInfo m_vkPipelineVertexInputStateCInfo_NoVertexInput = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -168,5 +159,83 @@ private:
 	std::vector<VkFence> m_vkInflightFrameFences;
 };
 
+// VKSingleQueueDeviceContext
+// * Only use one queue, which can graphics, compute and transfer
+//	? The problem is that this depends on the physical device and the chosen queue index. So it's better to also include the picking of the physical device here ?
+
+class VKSingleQueueDeviceContext
+{
+public:
+	VKSingleQueueDeviceContext(struct SDL_Window* sdlWin, const VkInstance& vkInst, const VkSurfaceKHR& vkSurf);
+
+	bool PickSurfaceFormat();
+
+	// Input: enabled layers, required extensions.
+	bool InitializeDeviceContext(
+		std::span<const char*> layers, 
+		std::span<const char*> extensions);
+
+	// Initialize context for realtime rendering, e.g. swapchain, semaphores, fences.
+	bool InitializeSwapchain();
+
+	bool InitializeInflightSemaphoresAndFences();
+
+	// Initialize realtime rendering objects, e.g. inflight semaphores, backbuffer render pass.
+	bool InitializeRealtimeRendering();
+
+	SDL_Window* GetWindow() const { return m_sdlWindow; }
+
+	VkInstance GetInstance() const { return m_instance; }
+	VkPhysicalDevice GetPhysicalDevice() const { return m_physicalDevice; }
+	VkDevice GetDevice() const { return m_device; }
+	uint32_t GetQueueFamilyIdx() const { return m_queueFamilyIdx; }
+	VkQueue GetQueue() const { return m_queue; }
+
+	VkSurfaceKHR GetSurface() const { return m_surface; }
+	VkSurfaceFormatKHR GetSurfaceFormat() const { return m_surfaceFormat; }
+
+	VkSwapchainKHR GetSwapchain() const { return m_swapchain; }
+	std::span<const VkImageView> GetSwapchainImageViews() const { return m_swapchainImageViews; }	
+
+	VkCommandPool GetCommandPool() const { return m_commandPool; }
+
+	uint32_t GetInflightFrameNum() const { return m_inflightFrameNum; }
+
+	~VKSingleQueueDeviceContext();
+
+private:
+	VkAllocationCallbacks* m_allocator{ nullptr };
+	struct SDL_Window* const m_sdlWindow{ nullptr };
+	const VkInstance m_instance{ VK_NULL_HANDLE };
+	const VkSurfaceKHR m_surface{ VK_NULL_HANDLE };
+
+	VkPhysicalDevice m_physicalDevice{ VK_NULL_HANDLE };
+	uint32_t m_queueFamilyIdx{ ~0u };
+
+	// Device and queues and command pool.
+	VkDevice m_device{ VK_NULL_HANDLE };
+	VkQueue m_queue{ VK_NULL_HANDLE };
+	VkCommandPool m_commandPool{ VK_NULL_HANDLE };		// Should this be put here?
+
+	// Swapchain.
+	VkSurfaceFormatKHR m_surfaceFormat{};
+	const uint32_t m_minImageCount{ 3 };
+	VkSwapchainKHR m_swapchain{ VK_NULL_HANDLE };
+	std::vector<VkImageView> m_swapchainImageViews;
+
+	// Backbuffer render pass and framebuffer.
+	VkRenderPass m_backBufferRenderPass{ VK_NULL_HANDLE };
+	std::vector<VkFramebuffer> m_swapchainFramebuffers;
+
+	// Inflights
+	static const int m_inflightFrameNum{ 2 };
+	int m_inflightFrameIdx{ 0 };
+	std::vector<VkSemaphore> m_imageAvailableSemaphores;
+	std::vector<VkSemaphore> m_renderFinishedSemaphores;
+	std::vector<VkFence> m_renderFinishedFences;
+
+	// Vma memory management.
+	//VmaAllocator m_VmaAllocator{ VK_NULL_HANDLE };
+};
 
 #endif

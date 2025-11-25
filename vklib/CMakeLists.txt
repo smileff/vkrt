@@ -22,6 +22,7 @@ list(APPEND IMGUI_SOURCES
 source_group("imgui" FILES ${IMGUI_SOURCES})
 
 list(APPEND SOURCES
+    log.h
     vklib.h
     vklib_function.cpp
     vklib_function.h

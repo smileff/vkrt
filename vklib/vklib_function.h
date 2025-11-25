@@ -10,6 +10,7 @@
 #include <deque>
 #include <map>
 #include <set>
+#include <span>
 #include <numeric>
 #include <iostream>
 #include <sstream>
@@ -40,29 +41,41 @@ private:
 
 // Check vulkan errors.
 
+#define RuntimeCheckError(code) do { if (!(code)) { fprintf(stderr, "[%s:%u] Runtime check failed: %s.\n", __FILE__, __LINE__, #code); throw std::runtime_error("Runtime check failed: " #code); } } while(0)
+
 bool VKCheckError(VkResult result, bool throwException);
 #define VKCall(code) (VKCheckError(code, true))
 #define VKSucceed(code) (VKCheckError(code, false))
 
 
-// Create vulkan instance.
+// VkInstance helper function.
 
-bool VKCreateInstance(VkInstance& vkInst, size_t instExtNum, const char** instExts, size_t enableLayerNum, const char** enableLayers, VkAllocationCallbacks* allocator = nullptr);
+bool VKCreateInstance(std::span<const char*> instExts, std::span<const char*> enableLayers, VkAllocationCallbacks* allocator, VkInstance* vkInstResultPtr);
+
+
+// Debug utilities.
 
 void VKSetDebugObjectName(VkDevice vkDevice, VkObjectType vkObjType, uint64_t vkObjHandle, const char* name);
 
+bool RegisterDebugReportCallback(VkInstance vkInst, PFN_vkDebugReportCallbackEXT vkDebugReportCallbackFunc);
 
-// Pick physcical device.
 
-bool VKPickPhysicalDeviceAndOneQueueFamily(VkInstance vkInst, VkSurfaceKHR surf, VkPhysicalDevice* vkPhysicalDevice, uint32_t* vkQueueFamilyIdx);
+// VkPhysicalDevice helper functions.
+
+bool VKPickSinglePhysicalDeviceAndQueueFamily(const VkInstance& vkInst, const VkSurfaceKHR& surf, VkPhysicalDevice* vkPhysicalDevice, uint32_t* vkQueueFamilyIdx);
+
+void VKPrintPhysicalDeviceName(const VkPhysicalDevice& vkPhysicalDevice);
+
+void VKPrintPhysicalDeviceQueueFamilyProperties(const VkPhysicalDevice& vkPhysicalDevice);
+
+void VKPrintPhysicalDeviceFeatures(const VkPhysicalDevice& vkPhysicalDevice);
+
+
+// VkSurface helper functions.
+
+bool VKPickSurfaceFormat(VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSurf, VkSurfaceFormatKHR* vkSurfFmtResult);
 
 void VKPrintSurfaceCapabilities(const char* surfName, VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSurf);
-
-void VKPrintPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice vkPhysicalDevice);
-
-void VKPrintPhysicalDeviceFeatures(const VkPhysicalDeviceFeatures& vkPhysicalDeviceFeatures);
-
-bool VKPickSurfaceFormat(VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSurf, VkSurfaceFormatKHR& surfFmt);
 
 
 // Create a logical device.
@@ -80,6 +93,14 @@ bool VKCreateDevice(
 	size_t enableExtensionCount, const char** enableExtensionNames,
 	const void* featureLinkedList = nullptr, VkAllocationCallbacks* vkAllocator = nullptr);
 
+bool VKCreateDevice(
+	VkPhysicalDevice vkPhysicalDevice,
+	std::span<const VKDeviceQueueCreateRequest> queueCreateRequests,
+	std::span<const char*> enableLayerNames,
+	std::span<const char*> enableExtensionNames,
+	const VkAllocationCallbacks* vkAllocator,
+	VkDevice* vkDeviceResult);
+
 // Shader & pipeline.
 
 extern const VkPipelineVertexInputStateCreateInfo g_VertexInputStateCreateInfo_NoVertexInput;
@@ -93,5 +114,12 @@ extern const VkPipelineDynamicStateCreateInfo g_DynamicStateCreateInfo_DynamicVi
 bool VKCompileShader(const std::string& shaderFilepath, const std::string& options, const std::string& outputFilepath);
 
 bool VKCreateShaderModuleFromSPV(VkDevice vkDevice, const std::string& filepath, VkShaderModule& shaderModule);
+
+
+// Destroy helper functions.
+void VKDestroySemaphoreVector(VkDevice device, std::vector<VkSemaphore>& semaphores, VkAllocationCallbacks* allocator);
+void VKDestroyFenceVector(VkDevice device, std::vector<VkFence>& fences, VkAllocationCallbacks* allocator);
+void VKDestroyImageViewVector(VkDevice device, std::vector<VkImageView>& imageViews, VkAllocationCallbacks* allocator);
+
 
 #endif
