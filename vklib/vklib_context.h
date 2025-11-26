@@ -92,7 +92,7 @@ private:
 
 
 // Swapchain vulkan objects.
-
+// NOT well organized, don't use this.
 class VKSwapchainContext
 {
 public:
@@ -168,20 +168,18 @@ class VKSingleQueueDeviceContext
 public:
 	VKSingleQueueDeviceContext(struct SDL_Window* sdlWin, const VkInstance& vkInst, const VkSurfaceKHR& vkSurf);
 
-	bool PickSurfaceFormat();
-
 	// Input: enabled layers, required extensions.
 	bool InitializeDeviceContext(
 		std::span<const char*> layers, 
 		std::span<const char*> extensions);
 
+	bool InitializeBackbufferPass();
+
 	// Initialize context for realtime rendering, e.g. swapchain, semaphores, fences.
+	void DestroySwapchain();
 	bool InitializeSwapchain();
 
 	bool InitializeInflightSemaphoresAndFences();
-
-	// Initialize realtime rendering objects, e.g. inflight semaphores, backbuffer render pass.
-	bool InitializeRealtimeRendering();
 
 	SDL_Window* GetWindow() const { return m_sdlWindow; }
 
@@ -205,7 +203,10 @@ public:
 
 private:
 	VkAllocationCallbacks* m_allocator{ nullptr };
+
 	struct SDL_Window* const m_sdlWindow{ nullptr };
+	uint32_t m_drawableWidth{ ~0u }, m_drawableHeight{ ~0u };
+
 	const VkInstance m_instance{ VK_NULL_HANDLE };
 	const VkSurfaceKHR m_surface{ VK_NULL_HANDLE };
 
@@ -217,14 +218,15 @@ private:
 	VkQueue m_queue{ VK_NULL_HANDLE };
 	VkCommandPool m_commandPool{ VK_NULL_HANDLE };		// Should this be put here?
 
-	// Swapchain.
 	VkSurfaceFormatKHR m_surfaceFormat{};
-	const uint32_t m_minImageCount{ 3 };
-	VkSwapchainKHR m_swapchain{ VK_NULL_HANDLE };
-	std::vector<VkImageView> m_swapchainImageViews;
 
 	// Backbuffer render pass and framebuffer.
 	VkRenderPass m_backBufferRenderPass{ VK_NULL_HANDLE };
+
+	// Swapchain contexts.
+	const uint32_t m_swapchainMinImageCount{ 3 };
+	VkSwapchainKHR m_swapchain{ VK_NULL_HANDLE };
+	std::vector<VkImageView> m_swapchainImageViews;
 	std::vector<VkFramebuffer> m_swapchainFramebuffers;
 
 	// Inflights

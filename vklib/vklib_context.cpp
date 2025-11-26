@@ -382,17 +382,13 @@ void VKInflightContext::NextFrame()
 
 VKSingleQueueDeviceContext::VKSingleQueueDeviceContext(SDL_Window* sdlWin, const VkInstance& vkInst, const VkSurfaceKHR& vkSurf)
 	: m_sdlWindow(sdlWin), m_instance(vkInst), m_surface(vkSurf)
-{}
-
-bool VKSingleQueueDeviceContext::PickSurfaceFormat()
 {
-	// Pick a surface format.
-	if (!VKPickSurfaceFormat(m_physicalDevice, m_surface, &m_surfaceFormat)) {
-		LogError("Failed to pick a surface format.");
-		return false;
-	}
+	assert(m_sdlWindow != nullptr);
+	assert(m_instance != VK_NULL_HANDLE);
+	assert(m_surface != VK_NULL_HANDLE);
 
-	return true;
+	// Get the size of the drawable rect.	
+	SDL_Vulkan_GetDrawableSize(m_sdlWindow, (int*)&m_drawableWidth, (int*)&m_drawableHeight);
 }
 
 bool VKSingleQueueDeviceContext::InitializeDeviceContext(std::span<const char*> layers, std::span<const char*> extensions)
@@ -418,7 +414,7 @@ bool VKSingleQueueDeviceContext::InitializeDeviceContext(std::span<const char*> 
 
 	// Get the queue.
 	vkGetDeviceQueue(m_device, m_queueFamilyIdx, 0, &m_queue);
-
+	
 	// Create a VkQueueCommandPool.
 	VkCommandPoolCreateInfo vkCmdPoolCInfo{
 		.sType{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO},
@@ -436,32 +432,88 @@ bool VKSingleQueueDeviceContext::InitializeDeviceContext(std::span<const char*> 
 	return true;
 }
 
-bool VKSingleQueueDeviceContext::InitializeSwapchain()
+bool VKSingleQueueDeviceContext::InitializeBackbufferPass()
+{	
+	// Create a renderpass render into the backbuffer of the swapchain.
+	RuntimeCheckError(m_backBufferRenderPass == VK_NULL_HANDLE);
+
+	// Only one color attachement which is the back buffer.
+	VkAttachmentDescription colorAttachment{
+		.flags{0},
+		.format{m_surfaceFormat.format},
+		.samples{VK_SAMPLE_COUNT_1_BIT},
+		.loadOp{VK_ATTACHMENT_LOAD_OP_CLEAR},
+		.storeOp{VK_ATTACHMENT_STORE_OP_STORE},
+		.stencilLoadOp{VK_ATTACHMENT_LOAD_OP_DONT_CARE},
+		.stencilStoreOp{VK_ATTACHMENT_STORE_OP_DONT_CARE},
+		.initialLayout{VK_IMAGE_LAYOUT_UNDEFINED},
+		.finalLayout{VK_IMAGE_LAYOUT_PRESENT_SRC_KHR},
+	};
+	VkAttachmentReference colorAttachmentRef = {
+		.attachment{0},
+		.layout{VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}
+	};
+	colorAttachmentRef.attachment = 0;
+	colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	// Only one sub pass.
+	VkSubpassDescription subpass = {};
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &colorAttachmentRef;
+
+	VkSubpassDependency dependency = {};
+	dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+	dependency.dstSubpass = 0;
+	dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependency.srcAccessMask = 0;
+	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+	// Create the back buffer pass.
+	VkRenderPassCreateInfo renderPassCInfo = {};
+	renderPassCInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	renderPassCInfo.attachmentCount = 1;
+	renderPassCInfo.pAttachments = &colorAttachment;
+	renderPassCInfo.subpassCount = 1;
+	renderPassCInfo.pSubpasses = &subpass;
+	renderPassCInfo.dependencyCount = 1;
+	renderPassCInfo.pDependencies = &dependency;
+	if (!VKSucceed(vkCreateRenderPass(m_device, &renderPassCInfo, nullptr, &m_backBufferRenderPass))) {
+		return false;
+	}
+
+	return true;
+}
+
+void VKSingleQueueDeviceContext::DestroySwapchain()
 {
-	// Should first destroy old swapchain if exists.
+	// Must first destroy framebuffers,
+	VKDestroyFramebufferVector(m_device, m_swapchainFramebuffers, m_allocator);
+
+	//	then image views,
 	VKDestroyImageViewVector(m_device, m_swapchainImageViews, m_allocator);
 
+	//	and last the swapchain itself.
 	if (m_swapchain != VK_NULL_HANDLE) {
 		vkDestroySwapchainKHR(m_device, m_swapchain, m_allocator);
 		m_swapchain = VK_NULL_HANDLE;
 	}
+}
 
-	if (m_surface == VK_NULL_HANDLE) {
-		LogError("A valid VkSurface is needed to initialize realtime rendering.");
-		return false;
-	}
-
-	uint32_t drawableWidth, drawableHeight;
-	SDL_Vulkan_GetDrawableSize(m_sdlWindow, (int*)&drawableWidth, (int*)&drawableHeight);
+bool VKSingleQueueDeviceContext::InitializeSwapchain()
+{
+	assert(m_swapchain == VK_NULL_HANDLE);
+	assert(m_swapchainImageViews.empty());	
 
 	// Create swapchain.
 	VkSwapchainCreateInfoKHR vkSwapchainCInfo{
 		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
 		.surface = m_surface,
-		.minImageCount = m_minImageCount,
+		.minImageCount = m_swapchainMinImageCount,
 		.imageFormat = m_surfaceFormat.format,
 		.imageColorSpace = m_surfaceFormat.colorSpace,
-		.imageExtent = VkExtent2D{ drawableWidth, drawableHeight },
+		.imageExtent = VkExtent2D{ m_drawableWidth, m_drawableHeight },
 		.imageArrayLayers = 1,
 		.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
 		.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -509,6 +561,26 @@ bool VKSingleQueueDeviceContext::InitializeSwapchain()
 		};
 	}
 
+	// Create the swapchain image view framebuffers.	
+	size_t swapchainFramebufferNum = m_swapchainImageViews.size();
+	m_swapchainFramebuffers.resize(swapchainFramebufferNum);
+	for (uint32_t i = 0; i < swapchainFramebufferNum; ++i) {
+		VkFramebufferCreateInfo framebufferCInfo = {
+			.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+			.renderPass = m_backBufferRenderPass,
+			.attachmentCount = 1,
+			.pAttachments = &m_swapchainImageViews[i],
+			.width = m_drawableWidth,
+			.height = m_drawableHeight,
+			.layers = 1,
+		};
+		if (!VKSucceed(vkCreateFramebuffer(m_device, &framebufferCInfo, nullptr, &m_swapchainFramebuffers[i]))) {
+			return false;
+		}
+	}
+
+	return true;
+
 	return true;
 }
 
@@ -543,79 +615,6 @@ bool VKSingleQueueDeviceContext::InitializeInflightSemaphoresAndFences()
 		};
 
 		if (!VKSucceed(vkCreateFence(m_device, &fenceCInfo, m_allocator, &m_renderFinishedFences[i]))) {
-			return false;
-		}
-	}
-
-	return true;
-}
-
-bool VKSingleQueueDeviceContext::InitializeRealtimeRendering()
-{
-	// Create a renderpass render into the backbuffer of the swapchain.
-	RuntimeCheckError(m_backBufferRenderPass == VK_NULL_HANDLE);
-	
-	VkAttachmentDescription colorAttachment{
-		.flags{0},
-		.format{m_surfaceFormat.format},
-		.samples{VK_SAMPLE_COUNT_1_BIT},
-		.loadOp{VK_ATTACHMENT_LOAD_OP_CLEAR},
-		.storeOp{VK_ATTACHMENT_STORE_OP_STORE},
-		.stencilLoadOp{VK_ATTACHMENT_LOAD_OP_DONT_CARE},
-		.stencilStoreOp{VK_ATTACHMENT_STORE_OP_DONT_CARE},
-		.initialLayout{VK_IMAGE_LAYOUT_UNDEFINED},
-		.finalLayout{VK_IMAGE_LAYOUT_PRESENT_SRC_KHR},
-	};
-
-	VkAttachmentReference colorAttachmentRef = {
-		.attachment{0},
-		.layout{VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}
-	};
-	colorAttachmentRef.attachment = 0;
-	colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-	VkSubpassDescription subpass = {};
-	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-	subpass.colorAttachmentCount = 1;
-	subpass.pColorAttachments = &colorAttachmentRef;
-
-	VkSubpassDependency dependency = {};
-	dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-	dependency.dstSubpass = 0;
-	dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	dependency.srcAccessMask = 0;
-	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-	VkRenderPassCreateInfo renderPassCInfo = {};
-	renderPassCInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-	renderPassCInfo.attachmentCount = 1;
-	renderPassCInfo.pAttachments = &colorAttachment;
-	renderPassCInfo.subpassCount = 1;
-	renderPassCInfo.pSubpasses = &subpass;
-	renderPassCInfo.dependencyCount = 1;
-	renderPassCInfo.pDependencies = &dependency;
-	if (!VKSucceed(vkCreateRenderPass(m_device, &renderPassCInfo, nullptr, &m_backBufferRenderPass))) {
-		return false;
-	}
-
-	// Create framebuffers.
-	int rtWidth, rtHeight;
-	SDL_Vulkan_GetDrawableSize(m_sdlWindow, &rtWidth, &rtHeight);
-
-	size_t swapchainFramebufferNum = m_swapchainImageViews.size();
-	m_swapchainFramebuffers.resize(swapchainFramebufferNum);
-	for (uint32_t i = 0; i < swapchainFramebufferNum; ++i) {
-		VkFramebufferCreateInfo framebufferCInfo = {
-			.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-			.renderPass = m_backBufferRenderPass,
-			.attachmentCount = 1,
-			.pAttachments = &m_swapchainImageViews[i],
-			.width = (uint32_t)rtWidth,
-			.height = (uint32_t)rtHeight,
-			.layers = 1,
-		};
-		if (!VKSucceed(vkCreateFramebuffer(m_device, &framebufferCInfo, nullptr, &m_swapchainFramebuffers[i]))) {
 			return false;
 		}
 	}

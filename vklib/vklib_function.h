@@ -120,6 +120,7 @@ bool VKCreateShaderModuleFromSPV(VkDevice vkDevice, const std::string& filepath,
 void VKDestroySemaphoreVector(VkDevice device, std::vector<VkSemaphore>& semaphores, VkAllocationCallbacks* allocator);
 void VKDestroyFenceVector(VkDevice device, std::vector<VkFence>& fences, VkAllocationCallbacks* allocator);
 void VKDestroyImageViewVector(VkDevice device, std::vector<VkImageView>& imageViews, VkAllocationCallbacks* allocator);
+void VKDestroyFramebufferVector(VkDevice device, std::vector<VkFramebuffer>& framebuffers, VkAllocationCallbacks* allocator);
 
 
 #endif

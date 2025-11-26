@@ -393,9 +393,6 @@ bool VKRTApplication::Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, c
 	if (!m_context.InitializeInflightSemaphoresAndFences()) {
 		return false;
 	}
-	if (!m_context.InitializeRealtimeRendering()) {
-		return false;
-	}
 
 	VkDevice device = m_context.GetDevice();
 	VkPhysicalDevice physicalDevice = m_context.GetPhysicalDevice();

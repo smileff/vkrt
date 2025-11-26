@@ -579,3 +579,16 @@ void VKDestroyImageViewVector(VkDevice device, std::vector<VkImageView>& imageVi
 	);
 	imageViews.clear();
 }
+
+void VKDestroyFramebufferVector(VkDevice device, std::vector<VkFramebuffer>& framebuffers, VkAllocationCallbacks* allocator)
+{
+	std::for_each(framebuffers.begin(), framebuffers.end(),
+		[=](VkFramebuffer framebuffer)
+		{
+			if (framebuffer != VK_NULL_HANDLE) {
+				vkDestroyFramebuffer(device, framebuffer, allocator);
+			}
+		}
+	);
+	framebuffers.clear();
+}
