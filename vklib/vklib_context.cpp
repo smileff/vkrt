@@ -380,30 +380,17 @@ void VKInflightContext::NextFrame()
 
 // VKSingleQueueDeviceContext
 
-VKSingleQueueDeviceContext::VKSingleQueueDeviceContext(SDL_Window* sdlWin, const VkInstance& vkInst, const VkSurfaceKHR& vkSurf)
-	: m_sdlWindow(sdlWin), m_instance(vkInst), m_surface(vkSurf)
+VKSingleQueueDeviceContext::VKSingleQueueDeviceContext(VkInstance vkInst, VkPhysicalDevice physDevice, uint32_t queueFamilyIdx)
+	: m_instance(vkInst)
+	, m_physicalDevice(physDevice)
+	, m_queueFamilyIdx(queueFamilyIdx)
 {
-	assert(m_sdlWindow != nullptr);
-	assert(m_instance != VK_NULL_HANDLE);
-	assert(m_surface != VK_NULL_HANDLE);
-
-	// Get the size of the drawable rect.	
-	SDL_Vulkan_GetDrawableSize(m_sdlWindow, (int*)&m_drawableWidth, (int*)&m_drawableHeight);
+	// Initialized with a drawable window.	
+	assert(m_instance != VK_NULL_HANDLE);		
 }
 
-bool VKSingleQueueDeviceContext::InitializeDeviceContext(std::span<const char*> layers, std::span<const char*> extensions)
+bool VKSingleQueueDeviceContext::InitializeDevice(std::span<const char*> layers, std::span<const char*> extensions)
 {
-	// Pick a physical device that supports all graphics, compute and transfer.
-	if (!VKPickSinglePhysicalDeviceAndQueueFamily(m_instance, m_surface, &m_physicalDevice, &m_queueFamilyIdx)) {
-		return false;
-	}
-
-	// Pick a surface format.
-	if (!VKPickSurfaceFormat(m_physicalDevice, m_surface, &m_surfaceFormat)) {
-		LogError("Failed to pick a surface format.");
-		return false;
-	}
-
 	// Create the device.
 	std::vector<VKDeviceQueueCreateRequest> vkDeviceQueueCreateRequest{ {m_queueFamilyIdx, 1, {1.0f}} };
 	std::vector<const char*> enabledLayerNames{};
@@ -412,7 +399,7 @@ bool VKSingleQueueDeviceContext::InitializeDeviceContext(std::span<const char*> 
 		return false;
 	}
 
-	// Get the queue.
+	// Get the DeviceQueue.
 	vkGetDeviceQueue(m_device, m_queueFamilyIdx, 0, &m_queue);
 	
 	// Create a VkQueueCommandPool.
@@ -432,60 +419,6 @@ bool VKSingleQueueDeviceContext::InitializeDeviceContext(std::span<const char*> 
 	return true;
 }
 
-bool VKSingleQueueDeviceContext::InitializeBackbufferPass()
-{	
-	// Create a renderpass render into the backbuffer of the swapchain.
-	RuntimeCheckError(m_backBufferRenderPass == VK_NULL_HANDLE);
-
-	// Only one color attachement which is the back buffer.
-	VkAttachmentDescription colorAttachment{
-		.flags{0},
-		.format{m_surfaceFormat.format},
-		.samples{VK_SAMPLE_COUNT_1_BIT},
-		.loadOp{VK_ATTACHMENT_LOAD_OP_CLEAR},
-		.storeOp{VK_ATTACHMENT_STORE_OP_STORE},
-		.stencilLoadOp{VK_ATTACHMENT_LOAD_OP_DONT_CARE},
-		.stencilStoreOp{VK_ATTACHMENT_STORE_OP_DONT_CARE},
-		.initialLayout{VK_IMAGE_LAYOUT_UNDEFINED},
-		.finalLayout{VK_IMAGE_LAYOUT_PRESENT_SRC_KHR},
-	};
-	VkAttachmentReference colorAttachmentRef = {
-		.attachment{0},
-		.layout{VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}
-	};
-	colorAttachmentRef.attachment = 0;
-	colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-	// Only one sub pass.
-	VkSubpassDescription subpass = {};
-	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-	subpass.colorAttachmentCount = 1;
-	subpass.pColorAttachments = &colorAttachmentRef;
-
-	VkSubpassDependency dependency = {};
-	dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-	dependency.dstSubpass = 0;
-	dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	dependency.srcAccessMask = 0;
-	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-	// Create the back buffer pass.
-	VkRenderPassCreateInfo renderPassCInfo = {};
-	renderPassCInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-	renderPassCInfo.attachmentCount = 1;
-	renderPassCInfo.pAttachments = &colorAttachment;
-	renderPassCInfo.subpassCount = 1;
-	renderPassCInfo.pSubpasses = &subpass;
-	renderPassCInfo.dependencyCount = 1;
-	renderPassCInfo.pDependencies = &dependency;
-	if (!VKSucceed(vkCreateRenderPass(m_device, &renderPassCInfo, nullptr, &m_backBufferRenderPass))) {
-		return false;
-	}
-
-	return true;
-}
-
 void VKSingleQueueDeviceContext::DestroySwapchain()
 {
 	// Must first destroy framebuffers,
@@ -501,8 +434,13 @@ void VKSingleQueueDeviceContext::DestroySwapchain()
 	}
 }
 
-bool VKSingleQueueDeviceContext::InitializeSwapchain()
+bool VKSingleQueueDeviceContext::InitializeSwapchainContext(VkSurfaceKHR surf, const VkSurfaceFormatKHR& surfFmt, const VkExtent2D& swapchainExtent, uint32_t swapchainMinImageCount)
 {
+	assert(surf != VK_NULL_HANDLE);
+	m_surface = surf;
+	m_surfaceFormat = surfFmt;
+	m_swapchainExtent = swapchainExtent;
+
 	assert(m_swapchain == VK_NULL_HANDLE);
 	assert(m_swapchainImageViews.empty());	
 
@@ -510,10 +448,10 @@ bool VKSingleQueueDeviceContext::InitializeSwapchain()
 	VkSwapchainCreateInfoKHR vkSwapchainCInfo{
 		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
 		.surface = m_surface,
-		.minImageCount = m_swapchainMinImageCount,
+		.minImageCount = swapchainMinImageCount,
 		.imageFormat = m_surfaceFormat.format,
 		.imageColorSpace = m_surfaceFormat.colorSpace,
-		.imageExtent = VkExtent2D{ m_drawableWidth, m_drawableHeight },
+		.imageExtent = m_swapchainExtent,
 		.imageArrayLayers = 1,
 		.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
 		.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -531,12 +469,12 @@ bool VKSingleQueueDeviceContext::InitializeSwapchain()
 	}
 
 	// Create image view for each image in swapchain.
-	uint32_t swapchainImageNum{ 0 };
+	uint32_t swapchainImageNum{ ~0u };
 	if (!VKSucceed(vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageNum, nullptr))) {
 		LogError("Failed to get swapchain image count.");
 		return false;
 	}
-	std::vector<VkImage> swapchainImages;
+	std::vector<VkImage> swapchainImages(swapchainImageNum, VK_NULL_HANDLE);
 	if (!VKSucceed(vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageNum, swapchainImages.data()))) {
 		LogError("Failed to get swapchain images.");
 		return false;
@@ -561,17 +499,67 @@ bool VKSingleQueueDeviceContext::InitializeSwapchain()
 		};
 	}
 
+	// Create the VkRenderPass draw into the swapchain images.
+	{
+		RuntimeCheckError(m_swapchainRenderPass == VK_NULL_HANDLE);
+
+		VkAttachmentDescription colorAttachment{
+			.flags{0},
+			.format{m_surfaceFormat.format},
+			.samples{VK_SAMPLE_COUNT_1_BIT},
+			.loadOp{VK_ATTACHMENT_LOAD_OP_CLEAR},
+			.storeOp{VK_ATTACHMENT_STORE_OP_STORE},
+			.stencilLoadOp{VK_ATTACHMENT_LOAD_OP_DONT_CARE},
+			.stencilStoreOp{VK_ATTACHMENT_STORE_OP_DONT_CARE},
+			.initialLayout{VK_IMAGE_LAYOUT_UNDEFINED},
+			.finalLayout{VK_IMAGE_LAYOUT_PRESENT_SRC_KHR},
+		};
+		VkAttachmentReference colorAttachmentRef = {
+			.attachment{0},
+			.layout{VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}
+		};
+		colorAttachmentRef.attachment = 0;
+		colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+		// Only one sub pass.
+		VkSubpassDescription subpass = {};
+		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		subpass.colorAttachmentCount = 1;
+		subpass.pColorAttachments = &colorAttachmentRef;
+
+		VkSubpassDependency dependency = {};
+		dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+		dependency.dstSubpass = 0;
+		dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.srcAccessMask = 0;
+		dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+		// Create the back buffer pass.
+		VkRenderPassCreateInfo renderPassCInfo = {};
+		renderPassCInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+		renderPassCInfo.attachmentCount = 1;
+		renderPassCInfo.pAttachments = &colorAttachment;
+		renderPassCInfo.subpassCount = 1;
+		renderPassCInfo.pSubpasses = &subpass;
+		renderPassCInfo.dependencyCount = 1;
+		renderPassCInfo.pDependencies = &dependency;
+		if (!VKSucceed(vkCreateRenderPass(m_device, &renderPassCInfo, nullptr, &m_swapchainRenderPass))) {
+			return false;
+		}
+	}
+
 	// Create the swapchain image view framebuffers.	
 	size_t swapchainFramebufferNum = m_swapchainImageViews.size();
 	m_swapchainFramebuffers.resize(swapchainFramebufferNum);
 	for (uint32_t i = 0; i < swapchainFramebufferNum; ++i) {
 		VkFramebufferCreateInfo framebufferCInfo = {
 			.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-			.renderPass = m_backBufferRenderPass,
+			.renderPass = m_swapchainRenderPass,
 			.attachmentCount = 1,
 			.pAttachments = &m_swapchainImageViews[i],
-			.width = m_drawableWidth,
-			.height = m_drawableHeight,
+			.width = m_swapchainExtent.width,
+			.height = m_swapchainExtent.height,
 			.layers = 1,
 		};
 		if (!VKSucceed(vkCreateFramebuffer(m_device, &framebufferCInfo, nullptr, &m_swapchainFramebuffers[i]))) {
@@ -580,16 +568,16 @@ bool VKSingleQueueDeviceContext::InitializeSwapchain()
 	}
 
 	return true;
-
-	return true;
 }
 
-bool VKSingleQueueDeviceContext::InitializeInflightSemaphoresAndFences()
+bool VKSingleQueueDeviceContext::InitializeInflightContext(int inflightFrameNum)
 {
 	// Check that all synchoronization objects should not be initialized.
 	RuntimeCheckError(m_imageAvailableSemaphores.empty());
 	RuntimeCheckError(m_renderFinishedSemaphores.empty());
 	RuntimeCheckError(m_renderFinishedFences.empty());
+
+	m_inflightFrameNum = inflightFrameNum;
 
 	// Create inflight semaphores and fences.
 	m_imageAvailableSemaphores.resize(m_inflightFrameNum);
@@ -622,6 +610,14 @@ bool VKSingleQueueDeviceContext::InitializeInflightSemaphoresAndFences()
 	return true;
 }
 
+bool VKSingleQueueDeviceContext::DeviceWaitIdle()
+{
+	if (!VKSucceed(vkDeviceWaitIdle(m_device))) {
+		return false;
+	}
+	return true;
+}
+
 VKSingleQueueDeviceContext::~VKSingleQueueDeviceContext()
 {
 	// Destroy inflight objects.
@@ -629,11 +625,20 @@ VKSingleQueueDeviceContext::~VKSingleQueueDeviceContext()
 	VKDestroySemaphoreVector(m_device, m_renderFinishedSemaphores, m_allocator);
 	VKDestroyFenceVector(m_device, m_renderFinishedFences, m_allocator);
 
-	// Destroy swapchain objects.
-	VKDestroyImageViewVector(m_device, m_swapchainImageViews, m_allocator);
-	
-	if (m_swapchain != VK_NULL_HANDLE) {
-		vkDestroySwapchainKHR(m_device, m_swapchain, m_allocator);
-		m_swapchain = VK_NULL_HANDLE;
+	DestroySwapchain();
+
+	if (m_commandPool != VK_NULL_HANDLE) 
+	{
+		vkDestroyCommandPool(m_device, m_commandPool, m_allocator);
+	}
+
+	if (m_swapchainRenderPass != VK_NULL_HANDLE)
+	{
+		vkDestroyRenderPass(m_device, m_swapchainRenderPass, m_allocator);
+	}
+
+	if (m_device != VK_NULL_HANDLE) 
+	{
+		vkDestroyDevice(m_device, m_allocator);
 	}
 }

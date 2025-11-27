@@ -97,7 +97,7 @@ bool SDLVulkanApplication::Run(int winWidth, int winHeight)
 	};
 
 	// Create vulkan instance.
-	if (!VKCreateInstance(m_vkInstance, vkInstExts, vkEnableLayers, nullptr)) {
+	if (!VKCreateInstance(vkInstExts, vkEnableLayers, nullptr, &m_vkInstance)) {
 		return false;
 	}
 
@@ -123,6 +123,12 @@ bool SDLVulkanApplication::Run(int winWidth, int winHeight)
 			if (event.type == SDL_QUIT) {
 				quit = true;
 			}
+			if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
+				quit = true;  // Quit if ESC is pressed.
+			}
+			if (quit) {
+				break;
+			}
 
 			// Handle 
 			HandleInput(event);
@@ -137,6 +143,13 @@ bool SDLVulkanApplication::Run(int winWidth, int winHeight)
 		std::cerr << "Failed to shutdown application." << std::endl;
 		return false;
 	}
+
+	vkDestroySurfaceKHR(m_vkInstance, m_vkSurface, nullptr);
+	vkDestroyInstance(m_vkInstance, nullptr);
+
+	// Cleanup SDL.
+	SDL_DestroyWindow(m_mainWin);
+	SDL_Quit();
 
 	return true;
 }

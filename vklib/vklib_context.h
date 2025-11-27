@@ -166,75 +166,72 @@ private:
 class VKSingleQueueDeviceContext
 {
 public:
-	VKSingleQueueDeviceContext(struct SDL_Window* sdlWin, const VkInstance& vkInst, const VkSurfaceKHR& vkSurf);
+
+	VKSingleQueueDeviceContext(VkInstance inst, VkPhysicalDevice physDevice, uint32_t queueFamilyIdx);
 
 	// Input: enabled layers, required extensions.
-	bool InitializeDeviceContext(
+	bool InitializeDevice(
 		std::span<const char*> layers, 
 		std::span<const char*> extensions);
 
-	bool InitializeBackbufferPass();
-
 	// Initialize context for realtime rendering, e.g. swapchain, semaphores, fences.
+	bool InitializeSwapchainContext(VkSurfaceKHR surf, const VkSurfaceFormatKHR& surfFmt, const VkExtent2D& swapchainExtent, uint32_t swapchainMinImageCount = 3);
+
 	void DestroySwapchain();
-	bool InitializeSwapchain();
 
-	bool InitializeInflightSemaphoresAndFences();
+	bool InitializeInflightContext(int inflightFrameNum = 2);
 
-	SDL_Window* GetWindow() const { return m_sdlWindow; }
+	// SDL_Window* GetWindow() const { return m_sdlWindow; }
 
 	VkInstance GetInstance() const { return m_instance; }
 	VkPhysicalDevice GetPhysicalDevice() const { return m_physicalDevice; }
-	VkDevice GetDevice() const { return m_device; }
 	uint32_t GetQueueFamilyIdx() const { return m_queueFamilyIdx; }
+	VkDevice GetDevice() const { return m_device; }
 	VkQueue GetQueue() const { return m_queue; }
 
 	VkSurfaceKHR GetSurface() const { return m_surface; }
 	VkSurfaceFormatKHR GetSurfaceFormat() const { return m_surfaceFormat; }
-
 	VkSwapchainKHR GetSwapchain() const { return m_swapchain; }
-	std::span<const VkImageView> GetSwapchainImageViews() const { return m_swapchainImageViews; }	
+	size_t GetSwapchainImageNum() const { return m_swapchainImageViews.size(); }
+	std::span<const VkImageView> GetSwapchainImageViews() const { return m_swapchainImageViews; }
+	VkRenderPass GetSwapchainRenderPass() const { return m_swapchainRenderPass; }
+
 
 	VkCommandPool GetCommandPool() const { return m_commandPool; }
 
-	uint32_t GetInflightFrameNum() const { return m_inflightFrameNum; }
+	int GetInflightFrameNum() const { return m_inflightFrameNum; }		
+
+	bool DeviceWaitIdle();
 
 	~VKSingleQueueDeviceContext();
 
 private:
 	VkAllocationCallbacks* m_allocator{ nullptr };
 
-	struct SDL_Window* const m_sdlWindow{ nullptr };
-	uint32_t m_drawableWidth{ ~0u }, m_drawableHeight{ ~0u };
-
-	const VkInstance m_instance{ VK_NULL_HANDLE };
-	const VkSurfaceKHR m_surface{ VK_NULL_HANDLE };
-
+	// Device context.
+	VkInstance m_instance{ VK_NULL_HANDLE };
 	VkPhysicalDevice m_physicalDevice{ VK_NULL_HANDLE };
 	uint32_t m_queueFamilyIdx{ ~0u };
-
-	// Device and queues and command pool.
 	VkDevice m_device{ VK_NULL_HANDLE };
 	VkQueue m_queue{ VK_NULL_HANDLE };
-	VkCommandPool m_commandPool{ VK_NULL_HANDLE };		// Should this be put here?
-
+	
+	// Swapchain context.	
+	VkSurfaceKHR m_surface{ VK_NULL_HANDLE };
 	VkSurfaceFormatKHR m_surfaceFormat{};
-
-	// Backbuffer render pass and framebuffer.
-	VkRenderPass m_backBufferRenderPass{ VK_NULL_HANDLE };
-
-	// Swapchain contexts.
-	const uint32_t m_swapchainMinImageCount{ 3 };
+	VkExtent2D m_swapchainExtent{ ~0u, ~0u };
 	VkSwapchainKHR m_swapchain{ VK_NULL_HANDLE };
+	VkRenderPass m_swapchainRenderPass{ VK_NULL_HANDLE };
 	std::vector<VkImageView> m_swapchainImageViews;
 	std::vector<VkFramebuffer> m_swapchainFramebuffers;
 
-	// Inflights
-	static const int m_inflightFrameNum{ 2 };
+	// Inflight context.
+	int m_inflightFrameNum{ 2 };
 	int m_inflightFrameIdx{ 0 };
 	std::vector<VkSemaphore> m_imageAvailableSemaphores;
 	std::vector<VkSemaphore> m_renderFinishedSemaphores;
 	std::vector<VkFence> m_renderFinishedFences;
+
+	VkCommandPool m_commandPool{ VK_NULL_HANDLE };		// Should this be put here?
 
 	// Vma memory management.
 	//VmaAllocator m_VmaAllocator{ VK_NULL_HANDLE };
