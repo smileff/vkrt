@@ -31,14 +31,14 @@ class VKRTApplication : public SDLVulkanApplication
 public:
 	bool Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, const VkSurfaceKHR& vkSurf) override;
 
-private:
-	std::unique_ptr<VKSingleQueueDeviceContext> m_context;
-public:
 	void RunOneFrame(double frameSeconds, double FPS) override;
-
 
 	bool Shutdown() override;
 
+private:
+	std::unique_ptr<VKSingleQueueDeviceContext> m_context;
+	VKCommandPoolContextUniquePtr m_cmdPoolCtx;
+	std::vector<VkCommandBuffer> m_inflightCmdBufs;
 };
 
 bool VKRTApplication::Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, const VkSurfaceKHR& vkSurf)
@@ -54,11 +54,11 @@ bool VKRTApplication::Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, c
 	VKPrintPhysicalDeviceName(vkPhysicalDevice);
 	VKPrintPhysicalDeviceFeatures(vkPhysicalDevice);
 	VKPrintPhysicalDeviceQueueFamilyProperties(vkPhysicalDevice);
-	
+
 	// Initailize the vulkan device context.
 	m_context = std::make_unique<VKSingleQueueDeviceContext>(vkInst, vkPhysicalDevice, queueFamilyIdx);
 	std::vector<const char*> enabledLayerNames = {};			// No layer to enable.
-	std::vector<const char*> enableExtensionNames = {};			// No extention to enable.
+	std::vector<const char*> enableExtensionNames = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };			// No extention to enable.
 	if (!m_context->InitializeDevice(enabledLayerNames, enableExtensionNames)) {
 		return false;
 	}
@@ -84,22 +84,21 @@ bool VKRTApplication::Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, c
 		return false;
 	}
 
-	// VkDevice device = m_context->GetDevice();	
-	// VkQueue queue = m_context->GetQueue();	
-	VkCommandPool commandPool = m_context->GetCommandPool();
-		
-	// Allocate a command buffer for each swapchain image.
-	size_t swapchainImageNum = m_context->GetSwapchainImageNum();
-	std::vector<VkCommandBuffer> imageCmdBufs(swapchainImageNum);
-	if (swapchainImageNum > 0) {
-		VkCommandBufferAllocateInfo cmdBufAllocInfo = {
-				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-				.commandPool = commandPool,
-				.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-				.commandBufferCount = (uint32_t)swapchainImageNum,
-		};
-		VKCall(vkAllocateCommandBuffers(m_context->GetDevice(), &cmdBufAllocInfo, imageCmdBufs.data()));
+	// Create command pool.
+	if (!m_context->CreateGraphicsQueueCommandPool(&m_cmdPoolCtx)) {
+		return false;
 	}
+
+	// std::array<VkCommandBuffer, 3> cmdBufs;
+	size_t inflightFrameNum = m_context->GetInflightFrameNum();
+	m_inflightCmdBufs.resize(inflightFrameNum, VK_NULL_HANDLE);
+	if (!m_cmdPoolCtx->AllocateCommandBuffers(inflightFrameNum, m_inflightCmdBufs)) {
+		return false;
+	}
+
+
+	// Allocate a command buffer for each swapchain image.
+
 
 	//uint32_t inflightFrameNum = m_context->GetInflightFrameNum();
 	// std::span<const VkImageView> swapchainImageViews = m_context->GetSwapchainImageViews();
@@ -154,7 +153,7 @@ void VKRTApplication::RunOneFrame(double frameSeconds, double FPS)
 		return;
 	}
 
-	uint32_t inflightFrameIndex = m_context->GetInflightFrameIndex();
+	size_t inflightFrameIndex = m_context->GetInflightFrameIndex();
 	VkImage swapchainImage = m_context->GetSwapchainImage();
 
 
@@ -176,128 +175,98 @@ void VKRTApplication::RunOneFrame(double frameSeconds, double FPS)
 
 	// Do rendering.
 	// Just clear the backbuffer now.
-	{					
-		// Reset command buffer.
-		VkCommandBuffer vkCmdBuf = imageCmdBufs[inflightIdx];
-		VKCall(vkResetCommandBuffer(vkCmdBuf, 0));
+	// 				
+	// Reset command buffer.
+	VkCommandBuffer vkCmdBuf = m_inflightCmdBufs[inflightFrameIndex];
+	VKCall(vkResetCommandBuffer(vkCmdBuf, 0));
 
-		// Begin the command buffer.
-		VkCommandBufferBeginInfo cmdBufBeginInfo = {
-			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-			.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-		};
-		VKCall(vkBeginCommandBuffer(vkCmdBuf, &cmdBufBeginInfo));
+	// Begin the command buffer.
+	VkCommandBufferBeginInfo cmdBufBeginInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+	};
+	VKCall(vkBeginCommandBuffer(vkCmdBuf, &cmdBufBeginInfo));
 
-		//// Transfer the image to the color attachment layout.
-		//VkImageMemoryBarrier imgBarrier = {
-		//	.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-		//	.srcAccessMask = 0,
-		//	.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-		//	.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-		//	.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-		//	.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		//	.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		//	.image = vkSwapchainImages[inflightIdx],
-		//	.subresourceRange = {
-		//		.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-		//		.baseMipLevel = 0,
-		//		.levelCount = 1,
-		//		.baseArrayLayer = 0,
-		//		.layerCount = 1,
-		//	},
-		//};
-		//vkCmdPipelineBarrier(
-		//	vkCmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
-		//	0, nullptr, 0, nullptr, 1, &imgBarrier);
+	//// Transfer the image to the color attachment layout.
+	//VkImageMemoryBarrier imgBarrier = {
+	//	.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+	//	.srcAccessMask = 0,
+	//	.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+	//	.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+	//	.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	//	.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	//	.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	//	.image = vkSwapchainImages[inflightIdx],
+	//	.subresourceRange = {
+	//		.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	//		.baseMipLevel = 0,
+	//		.levelCount = 1,
+	//		.baseArrayLayer = 0,
+	//		.layerCount = 1,
+	//	},
+	//};
+	//vkCmdPipelineBarrier(
+	//	vkCmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
+	//	0, nullptr, 0, nullptr, 1, &imgBarrier);
 
-		//// Fill the image with red color
-		//VkClearColorValue clearColor = {
-		//	.float32 = { 1.0f, 0.0f, 0.0f, 1.0f },
-		//};
-		//VkImageSubresourceRange fillRange = {
-		//	.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-		//	.baseMipLevel = 0,
-		//	.levelCount = 1,
-		//	.baseArrayLayer = 0,
-		//	.layerCount = 1,
-		//};
-		//vkCmdClearColorImage(vkCmdBuf, vkSwapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColor, 1, &fillRange);
+	//// Fill the image with red color
+	//VkClearColorValue clearColor = {
+	//	.float32 = { 1.0f, 0.0f, 0.0f, 1.0f },
+	//};
+	//VkImageSubresourceRange fillRange = {
+	//	.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	//	.baseMipLevel = 0,
+	//	.levelCount = 1,
+	//	.baseArrayLayer = 0,
+	//	.layerCount = 1,
+	//};
+	//vkCmdClearColorImage(vkCmdBuf, vkSwapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColor, 1, &fillRange);
 
-		// Transfer the swapchain image to the present layout.
-		VkImageMemoryBarrier presentImgBarrier = {
-			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-			.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-			.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
-			.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-			.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = vkSwapchainImage,
-			.subresourceRange = {
-				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-				.baseMipLevel = 0,
-				.levelCount = 1,
-				.baseArrayLayer = 0,
-				.layerCount = 1,
-			},
-		};
-		vkCmdPipelineBarrier(
-			vkCmdBuf, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
-			0, nullptr, 0, nullptr, 1, &presentImgBarrier);
-
-
-		VkClearValue clearValue = { 0.1f, 0.0f, 0.0f, 1.0f };
-		VkRenderPassBeginInfo renderPassBeginInfo = {};
-		renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-		renderPassBeginInfo.renderPass = m_context->GetSwapchainRenderPass();
-		renderPassBeginInfo.framebuffer = vkFramebuffers[imgIdx];
-		renderPassBeginInfo.renderArea.extent.width = (uint32_t)rtWidth;
-		renderPassBeginInfo.renderArea.extent.height = (uint32_t)rtHeight;
-		renderPassBeginInfo.clearValueCount = 1;
-		renderPassBeginInfo.pClearValues = &clearValue;
-		vkCmdBeginRenderPass(vkCmdBuf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-		//// ImGui render.
-		//ImGui::Render();
-		//ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vkCmdBuf);
-
-		vkCmdEndRenderPass(vkCmdBuf);
-
-		// End the command buffer.
-		VKCall(vkEndCommandBuffer(vkCmdBuf));
+	// Transfer the swapchain image to the present layout.
+	VkImageMemoryBarrier presentImgBarrier = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+		.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+		.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+		.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = swapchainImage,
+		.subresourceRange = {
+			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = 0,
+			.layerCount = 1,
+		},
+	};
+	vkCmdPipelineBarrier(
+		vkCmdBuf, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
+		0, nullptr, 0, nullptr, 1, &presentImgBarrier);
 
 
+	VkClearValue clearValue = { 0.75f, 0.0f, 0.0f, 1.0f };
+	VkRenderPassBeginInfo renderPassBeginInfo = {
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		.renderPass = m_context->GetSwapchainRenderPass(),
+		.framebuffer = m_context->GetSwapchainFramebuffer(),
+		.renderArea = m_context->GetSwapchainRect(),
+		.clearValueCount = 1,
+		.pClearValues = &clearValue,
+	};
+	vkCmdBeginRenderPass(vkCmdBuf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-		// Submit the command buffer.
-		VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-		VkSubmitInfo submitInfo = {
-			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &imageAvailableSemaphores[inflightIdx],
-			.pWaitDstStageMask = waitStages,
-			.commandBufferCount = 1,
-			.pCommandBuffers = &vkCmdBuf,
-			.signalSemaphoreCount = 1,
-			.pSignalSemaphores = &renderFinishedSemaphores[inflightIdx],
-		};
-		VKCall(vkQueueSubmit(vkQueue, 1, &submitInfo, renderFinishedFences[inflightIdx]));
+	//// ImGui render.
+	//ImGui::Render();
+	//ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vkCmdBuf);
 
-		// Queue present.
-		VkResult presentRes = VK_SUCCESS;
-		VkPresentInfoKHR presentInfo = {
-			.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &renderFinishedSemaphores[inflightIdx],
-			.swapchainCount = 1,
-			.pSwapchains = &vkSwapchain,
-			.pImageIndices = &imgIdx,
-			.pResults = &presentRes,
-		};
-		VKCall(vkQueuePresentKHR(vkQueue, &presentInfo));
+	vkCmdEndRenderPass(vkCmdBuf);
 
-	}
+	// End the command buffer.
+	VKCall(vkEndCommandBuffer(vkCmdBuf));
 
-	m_context->EndFrame();
+
+	m_context->EndFrame(std::span<VkCommandBuffer>(&vkCmdBuf, 1), true);
 }
 
 bool VKRTApplication::Shutdown()
@@ -306,17 +275,23 @@ bool VKRTApplication::Shutdown()
 	m_context->DeviceWaitIdle();
 
 	// ImGuid shutdown.
-	ImGui_ImplVulkan_Shutdown();
-	ImGui_ImplSDL2_Shutdown();
-	ImGui::DestroyContext();
+	//ImGui_ImplVulkan_Shutdown();
+	//ImGui_ImplSDL2_Shutdown();
+	//ImGui::DestroyContext();
+
+	// Release the command pool.
+
+	m_cmdPoolCtx.reset();
 
 	m_context.reset();
+
+	return true;
 }
 
 int main(int argc, char** argv)
 {	
 	VKRTApplication app;
-	app.Run(2560, 1440);
+	app.Run(1280, 720);
 	
 	return 0;
 }

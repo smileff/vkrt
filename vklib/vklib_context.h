@@ -159,12 +159,52 @@ private:
 	std::vector<VkFence> m_vkInflightFrameFences;
 };
 
-struct VKCommandPoolContext
+class VKCommandPoolContext
 {
-	VkDevice Device{ VK_NULL_HANDLE };
-	uint32_t QueueFamilyIndex{ ~0u };
-	VkQueue Queue{ VK_NULL_HANDLE };
-	VkCommandPool CommandPool{ VK_NULL_HANDLE };
+public:
+	VKCommandPoolContext(VkDevice device, uint32_t queueFamilyIndex, VkQueue queue, VkCommandPool commandPool, VkAllocationCallbacks* allocator)
+		: m_device(device)
+		, m_queueFamilyIndex(queueFamilyIndex)
+		, m_queue(queue)
+		, m_commandPool(commandPool)
+		, m_allocator(allocator)
+	{
+	}
+
+	~VKCommandPoolContext()
+	{
+		vkDestroyCommandPool(m_device, m_commandPool, m_allocator);
+	}
+
+	bool AllocateCommandBuffers(size_t cmdBufNum, const std::span<VkCommandBuffer>& cmdBufs) 
+	{
+		if (cmdBufs.size() < cmdBufNum) {
+			LogError("VKCommandPoolContext::CreateCommandBuffer: cmdBufs size is smaller than cmdBufNum.");
+			return false;
+		}
+
+		if (cmdBufNum > 0) {
+			VkCommandBufferAllocateInfo cmdBufAllocInfo = {
+					.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+					.commandPool = m_commandPool,
+					.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+					.commandBufferCount = (uint32_t)cmdBufNum,
+			};
+			if (!VKSucceed(vkAllocateCommandBuffers(m_device, &cmdBufAllocInfo, cmdBufs.data()))) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+
+private:
+	VkDevice m_device{ VK_NULL_HANDLE };
+	uint32_t m_queueFamilyIndex{ ~0u };
+	VkQueue m_queue{ VK_NULL_HANDLE };
+	VkCommandPool m_commandPool{ VK_NULL_HANDLE };
+	VkAllocationCallbacks* m_allocator{ nullptr };
 };
 using VKCommandPoolContextUniquePtr = std::unique_ptr<VKCommandPoolContext>;
 using VKCommandPoolContextSharedPtr = std::shared_ptr<VKCommandPoolContext>;
@@ -191,7 +231,7 @@ public:
 
 	bool InitializeInflightContext(uint32_t inflightFrameNum = 2);
 
-	VKCommandPoolContext CreateGraphicsQueueCommandPool();
+	bool CreateGraphicsQueueCommandPool(VKCommandPoolContextUniquePtr* cmdPoolCtx);
 	// VKCommandPoolContextSharedPtr CreateComputeQueueCommandPool();
 
 	// SDL_Window* GetWindow() const { return m_sdlWindow; }
@@ -212,14 +252,18 @@ public:
 
 	VkCommandPool GetCommandPool() const { return m_commandPool; }
 
-	int GetInflightFrameNum() const { return m_inflightFrameNum; }		
+	size_t GetInflightFrameNum() const { return m_inflightFrameNum; }		
 
 	// If return false, can't begin the current frame.
 	bool BeginFrame();	
-	uint32_t GetInflightFrameIndex() const { return m_inflightFrameIdx; }
+	size_t GetInflightFrameIndex() const { return m_inflightFrameIdx; }
 	VkImage GetSwapchainImage() const { return m_swapchainImages[m_currSwapchainImageIndex]; }
+	VkFramebuffer GetSwapchainFramebuffer() const { return m_swapchainFramebuffers[m_currSwapchainImageIndex]; }
+	VkRect2D GetSwapchainRect() const { return VkRect2D{ {0,0}, m_swapchainExtent }; }
 
-	void EndFrame();
+	// bool GraphicsQueueSubmitAndPresent
+
+	void EndFrame(const std::span<VkCommandBuffer>& cmdBufs, bool present);
 
 	bool DeviceWaitIdle();
 
@@ -247,8 +291,8 @@ private:
 	std::vector<VkFramebuffer> m_swapchainFramebuffers;
 
 	// Inflight context.
-	uint32_t m_inflightFrameNum{ 2 };
-	uint32_t m_inflightFrameIdx{ 0 };
+	size_t m_inflightFrameNum{ 2 };
+	size_t m_inflightFrameIdx{ 0 };
 	std::vector<VkSemaphore> m_imageAvailableSemaphores;
 	std::vector<VkSemaphore> m_renderFinishedSemaphores;
 	std::vector<VkFence> m_renderFinishedFences;

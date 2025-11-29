@@ -146,51 +146,51 @@ bool VKPickSinglePhysicalDeviceAndQueueFamily(const VkInstance& vkInst, const Vk
 	return true;
 }
 
-bool VKCreateDevice(
-	VkDevice& vkDevice,
-	VkPhysicalDevice vkPhysicalDevice,
-	size_t queueCreateRequestCount, const VKDeviceQueueCreateRequest* queueCreateRequests,
-	size_t enableLayerCount, const char** enableLayerNames,
-	size_t enableExtensionCount, const char** enableExtensionNames,
-	const void* featureLinkedList, const VkAllocationCallbacks* vkAllocator)
-{
-	size_t queueFamilyCnt = queueCreateRequestCount;
-	std::vector<VkDeviceQueueCreateInfo> deviceQueueCInfos(queueFamilyCnt);
-	for (size_t i = 0; i < queueFamilyCnt; ++i) {
-		const VKDeviceQueueCreateRequest& request = queueCreateRequests[i];
-		deviceQueueCInfos[i] = {
-			.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-			.queueFamilyIndex = request.QueueFamilyIdx,
-			.queueCount = request.QueueCount,
-			.pQueuePriorities = request.QueuePriorities.data(),
-		};
-	}
-
-	VkDeviceCreateInfo deviceCInfo = {
-		.sType{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO },
-		.pNext = featureLinkedList,
-		.queueCreateInfoCount = (uint32_t)deviceQueueCInfos.size(),
-		.pQueueCreateInfos = deviceQueueCInfos.data(),
-		.enabledLayerCount = (uint32_t)enableLayerCount,
-		.ppEnabledLayerNames = enableLayerNames,
-		.enabledExtensionCount = (uint32_t)enableExtensionCount,
-		.ppEnabledExtensionNames = enableExtensionNames,
-	};
-
-	vkDevice = VK_NULL_HANDLE;
-	if (!VKSucceed(vkCreateDevice(vkPhysicalDevice, &deviceCInfo, vkAllocator, &vkDevice))) {
-		return false;
-	}
-
-	return true;
-}
+//bool VKCreateDevice(
+//	VkDevice& vkDevice,
+//	VkPhysicalDevice vkPhysicalDevice,
+//	size_t queueCreateRequestCount, const VKDeviceQueueCreateRequest* queueCreateRequests,
+//	size_t enableLayerCount, const char** enableLayerNames,
+//	size_t enableExtensionCount, const char** enableExtensionNames,
+//	const void* featureLinkedList, const VkAllocationCallbacks* vkAllocator)
+//{
+//	size_t queueFamilyCnt = queueCreateRequestCount;
+//	std::vector<VkDeviceQueueCreateInfo> deviceQueueCInfos(queueFamilyCnt);
+//	for (size_t i = 0; i < queueFamilyCnt; ++i) {
+//		const VKDeviceQueueCreateRequest& request = queueCreateRequests[i];
+//		deviceQueueCInfos[i] = {
+//			.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+//			.queueFamilyIndex = request.QueueFamilyIdx,
+//			.queueCount = request.QueueCount,
+//			.pQueuePriorities = request.QueuePriorities.data(),
+//		};
+//	}
+//
+//	VkDeviceCreateInfo deviceCInfo = {
+//		.sType{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO },
+//		.pNext = featureLinkedList,
+//		.queueCreateInfoCount = (uint32_t)deviceQueueCInfos.size(),
+//		.pQueueCreateInfos = deviceQueueCInfos.data(),
+//		.enabledLayerCount = (uint32_t)enableLayerCount,
+//		.ppEnabledLayerNames = enableLayerNames,
+//		.enabledExtensionCount = (uint32_t)enableExtensionCount,
+//		.ppEnabledExtensionNames = enableExtensionNames,
+//	};
+//
+//	vkDevice = VK_NULL_HANDLE;
+//	if (!VKSucceed(vkCreateDevice(vkPhysicalDevice, &deviceCInfo, vkAllocator, &vkDevice))) {
+//		return false;
+//	}
+//
+//	return true;
+//}
 
 bool VKCreateDevice(
 	VkPhysicalDevice vkPhysicalDevice, 
 	std::span<const VKDeviceQueueCreateRequest> queueCreateRequests, 
 	std::span<const char*> enableLayerNames, 
 	std::span<const char*> enableExtensionNames, 
-	VkAllocationCallbacks* vkAllocator,
+	const VkAllocationCallbacks* vkAllocator,
 	VkDevice* vkDevicePtr)
 {
 	// Make the VkDeviceQueueCreateInfo array and VkDeviceCreateInfo.

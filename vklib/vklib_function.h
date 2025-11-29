@@ -86,12 +86,12 @@ struct VKDeviceQueueCreateRequest
 	uint32_t QueueCount;
 	std::vector<float> QueuePriorities;
 };
-bool VKCreateDevice(
-	VkDevice& vkDevice, VkPhysicalDevice vkPhysicalDevice,
-	size_t queueCreateRequestCount, const VKDeviceQueueCreateRequest* queueCreateRequests,
-	size_t enableLayerCount, const char** enableLayerNames,
-	size_t enableExtensionCount, const char** enableExtensionNames,
-	const void* featureLinkedList = nullptr, VkAllocationCallbacks* vkAllocator = nullptr);
+//bool VKCreateDevice(
+//	VkDevice& vkDevice, VkPhysicalDevice vkPhysicalDevice,
+//	size_t queueCreateRequestCount, const VKDeviceQueueCreateRequest* queueCreateRequests,
+//	size_t enableLayerCount, const char** enableLayerNames,
+//	size_t enableExtensionCount, const char** enableExtensionNames,
+//	const void* featureLinkedList = nullptr, VkAllocationCallbacks* vkAllocator = nullptr);
 
 bool VKCreateDevice(
 	VkPhysicalDevice vkPhysicalDevice,

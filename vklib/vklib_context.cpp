@@ -44,9 +44,17 @@ VKDeviceContext::~VKDeviceContext()
 bool VKDeviceContext::InitDeviceContext(size_t queueCreateQuestCnt, const VKDeviceQueueCreateRequest* queueCreateQuests, size_t layerCnt, const char** layers, size_t extensionCnt, const char** extensions)
 {
 	// Create the vulkan device.
-	if (!VKCreateDevice(m_vkDevice, m_vkPhysicalDevice, queueCreateQuestCnt, queueCreateQuests, layerCnt, layers, extensionCnt, extensions)) {
-		return false;
-	}
+	//if (!VKCreateDevice(m_vkDevice, m_vkPhysicalDevice, queueCreateQuestCnt, queueCreateQuests, layerCnt, layers, extensionCnt, extensions)) {
+	//	return false;
+	//}
+
+	//if (!VKCreateDevice(
+	//		m_vkPhysicalDevice, 
+	//	std::span<VKDeviceQueueCreateRequest>(queueCreateQuests, queueCreateQuestCnt), 
+	//	std::span<const char*>(layers, layerCnt),
+	//	std::span<const char*>(extensions, extensionCnt), &m_device) {
+	//	return false;
+	//}
 
 	// Get queues.
 	m_vkQueueFamilyIdxs.reserve(queueCreateQuestCnt);
@@ -393,9 +401,9 @@ bool VKSingleQueueDeviceContext::InitializeDevice(std::span<const char*> layers,
 {
 	// Create the device.
 	std::vector<VKDeviceQueueCreateRequest> vkDeviceQueueCreateRequest{ {m_queueFamilyIdx, 1, {1.0f}} };
-	std::vector<const char*> enabledLayerNames{};
-	std::vector<const char*> enabledExtensionNames{};
-	if (!VKCreateDevice(m_physicalDevice, vkDeviceQueueCreateRequest, enabledLayerNames, enabledExtensionNames, nullptr, &m_device)) {
+	//std::vector<const char*> enabledLayerNames{};
+	//std::vector<const char*> enabledExtensionNames{};
+	if (!VKCreateDevice(m_physicalDevice, vkDeviceQueueCreateRequest, layers, extensions, nullptr, &m_device)) {
 		return false;
 	}
 
@@ -474,11 +482,13 @@ bool VKSingleQueueDeviceContext::InitializeSwapchainContext(VkSurfaceKHR surf, c
 		LogError("Failed to get swapchain image count.");
 		return false;
 	}
+	m_swapchainImages.resize(swapchainImageNum, VK_NULL_HANDLE);
 	if (!VKSucceed(vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageNum, m_swapchainImages.data()))) {
 		LogError("Failed to get swapchain images.");
 		return false;
 	}
 	
+	// Create an VKImageView for each swapchain image.
 	m_swapchainImageViews.resize(swapchainImageNum);
 	for (uint32_t swapchainImageIdx = 0; swapchainImageIdx < swapchainImageNum; ++swapchainImageIdx)
 	{
@@ -496,6 +506,9 @@ bool VKSingleQueueDeviceContext::InitializeSwapchainContext(VkSurfaceKHR surf, c
 				.layerCount = 1,
 			},
 		};
+		if (!VKSucceed(vkCreateImageView(m_device, &imageViewCInfo, nullptr, &m_swapchainImageViews[swapchainImageIdx]))) {
+			return false;
+		}
 	}
 
 	// Create the VkRenderPass draw into the swapchain images.
@@ -548,7 +561,7 @@ bool VKSingleQueueDeviceContext::InitializeSwapchainContext(VkSurfaceKHR surf, c
 		}
 	}
 
-	// Create the swapchain image view framebuffers.	
+	// Create the swapchain framebuffers.	
 	size_t swapchainFramebufferNum = m_swapchainImageViews.size();
 	m_swapchainFramebuffers.resize(swapchainFramebufferNum);
 	for (uint32_t i = 0; i < swapchainFramebufferNum; ++i) {
@@ -582,7 +595,7 @@ bool VKSingleQueueDeviceContext::InitializeInflightContext(uint32_t inflightFram
 	m_imageAvailableSemaphores.resize(m_inflightFrameNum);
 	m_renderFinishedSemaphores.resize(m_inflightFrameNum);
 	m_renderFinishedFences.resize(m_inflightFrameNum);
-	for (int i = 0; i < m_inflightFrameNum; ++i)
+	for (uint32_t i = 0; i < m_inflightFrameNum; ++i)
 	{
 		VkSemaphoreCreateInfo semaphoreCInfo{
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
@@ -609,12 +622,24 @@ bool VKSingleQueueDeviceContext::InitializeInflightContext(uint32_t inflightFram
 	return true;
 }
 
-VKCommandPoolContext VKSingleQueueDeviceContext::CreateGraphicsQueueCommandPool()
+bool VKSingleQueueDeviceContext::CreateGraphicsQueueCommandPool(VKCommandPoolContextUniquePtr* cmdPoolCtx)
 {
-	VkCommandPoolCreateInfo cinfo = {
+	assert(cmdPoolCtx != nullptr);
+
+	VkCommandPoolCreateInfo cmdPoolCInfo = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-		.flags = 
+		.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+		.queueFamilyIndex = m_queueFamilyIdx,
 	};
+
+	VkCommandPool commandPool = VK_NULL_HANDLE;
+	if (!VKSucceed(vkCreateCommandPool(m_device, &cmdPoolCInfo, m_allocator, &commandPool))) {
+		return false;
+	}
+	
+	*cmdPoolCtx = std::make_unique<VKCommandPoolContext>(m_device, m_queueFamilyIdx, m_queue, commandPool, m_allocator);
+
+	return true;
 }
 
 bool VKSingleQueueDeviceContext::BeginFrame()
@@ -643,8 +668,38 @@ bool VKSingleQueueDeviceContext::BeginFrame()
 	return true;
 }
 
-void VKSingleQueueDeviceContext::EndFrame()
+void VKSingleQueueDeviceContext::EndFrame(const std::span<VkCommandBuffer>& cmdBufs, bool present)
 {
+	// Submit the command buffer.
+	VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+	VkSubmitInfo submitInfo = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &m_imageAvailableSemaphores[m_inflightFrameIdx],
+		.pWaitDstStageMask = waitStages,
+		.commandBufferCount = (uint32_t)cmdBufs.size(),
+		.pCommandBuffers = cmdBufs.data(),
+		.signalSemaphoreCount = 1,
+		.pSignalSemaphores = &m_renderFinishedSemaphores[m_inflightFrameIdx],
+	};
+	VKCall(vkQueueSubmit(m_queue, 1, &submitInfo, m_renderFinishedFences[m_inflightFrameIdx]));
+
+	// Queue present.
+	if (present)
+	{
+		VkResult presentRes = VK_SUCCESS;
+		VkPresentInfoKHR presentInfo = {
+			.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+			.waitSemaphoreCount = 1,
+			.pWaitSemaphores = &m_renderFinishedSemaphores[m_inflightFrameIdx],
+			.swapchainCount = 1,
+			.pSwapchains = &m_swapchain,
+			.pImageIndices = &m_currSwapchainImageIndex,
+			.pResults = &presentRes,
+		};
+		VKCall(vkQueuePresentKHR(m_queue, &presentInfo));
+	}
+
 	m_inflightFrameIdx = (m_inflightFrameIdx + 1) % m_inflightFrameNum;
 }
 

@@ -6,26 +6,6 @@
 #include "imgui_function.h"
 #include "fps_counter.h"
 
-SDLVulkanApplication::~SDLVulkanApplication()
-{
-	if (m_vkSurface) {
-		vkDestroySurfaceKHR(m_vkInstance, m_vkSurface, nullptr);
-		m_vkSurface = VK_NULL_HANDLE;
-	}
-
-	if (m_vkInstance) {
-		vkDestroyInstance(m_vkInstance, nullptr);
-		m_vkInstance = VK_NULL_HANDLE;
-	}
-
-	if (m_mainWin) {
-		SDL_DestroyWindow(m_mainWin);
-		m_mainWin = nullptr;
-	}
-
-	SDL_Quit();
-}
-
 //bool SDLContext::Init(int winWidth, int winHeight)
 //{
 //	// Initialize SDL.
@@ -144,11 +124,20 @@ bool SDLVulkanApplication::Run(int winWidth, int winHeight)
 		return false;
 	}
 
-	vkDestroySurfaceKHR(m_vkInstance, m_vkSurface, nullptr);
-	vkDestroyInstance(m_vkInstance, nullptr);
+	if (m_vkSurface) {
+		vkDestroySurfaceKHR(m_vkInstance, m_vkSurface, nullptr);
+		m_vkSurface = VK_NULL_HANDLE;
+	}
+	if (m_vkInstance) {
+		vkDestroyInstance(m_vkInstance, nullptr);
+		m_vkInstance = VK_NULL_HANDLE;
+	}
 
 	// Cleanup SDL.
-	SDL_DestroyWindow(m_mainWin);
+	if (m_mainWin != nullptr) {
+		SDL_DestroyWindow(m_mainWin);
+		m_mainWin = nullptr;
+	}
 	SDL_Quit();
 
 	return true;

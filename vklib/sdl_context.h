@@ -22,7 +22,6 @@ public:
 	virtual void RunOneFrame(double frameSeconds, double FPS) {}
 	virtual bool Shutdown() { return true; }
 
-	virtual ~SDLVulkanApplication();
 private:
  	SDL_Window *m_mainWin = nullptr;
 	VkInstance m_vkInstance = VK_NULL_HANDLE;
