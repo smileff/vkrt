@@ -474,8 +474,7 @@ bool VKSingleQueueDeviceContext::InitializeSwapchainContext(VkSurfaceKHR surf, c
 		LogError("Failed to get swapchain image count.");
 		return false;
 	}
-	std::vector<VkImage> swapchainImages(swapchainImageNum, VK_NULL_HANDLE);
-	if (!VKSucceed(vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageNum, swapchainImages.data()))) {
+	if (!VKSucceed(vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageNum, m_swapchainImages.data()))) {
 		LogError("Failed to get swapchain images.");
 		return false;
 	}
@@ -485,7 +484,7 @@ bool VKSingleQueueDeviceContext::InitializeSwapchainContext(VkSurfaceKHR surf, c
 	{
 		VkImageViewCreateInfo imageViewCInfo{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-			.image = swapchainImages[swapchainImageIdx],
+			.image = m_swapchainImages[swapchainImageIdx],
 			.viewType = VK_IMAGE_VIEW_TYPE_2D,
 			.format = m_surfaceFormat.format,
 			.components = VkComponentMapping{},
@@ -570,7 +569,7 @@ bool VKSingleQueueDeviceContext::InitializeSwapchainContext(VkSurfaceKHR surf, c
 	return true;
 }
 
-bool VKSingleQueueDeviceContext::InitializeInflightContext(int inflightFrameNum)
+bool VKSingleQueueDeviceContext::InitializeInflightContext(uint32_t inflightFrameNum)
 {
 	// Check that all synchoronization objects should not be initialized.
 	RuntimeCheckError(m_imageAvailableSemaphores.empty());
@@ -608,6 +607,45 @@ bool VKSingleQueueDeviceContext::InitializeInflightContext(int inflightFrameNum)
 	}
 
 	return true;
+}
+
+VKCommandPoolContext VKSingleQueueDeviceContext::CreateGraphicsQueueCommandPool()
+{
+	VkCommandPoolCreateInfo cinfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+		.flags = 
+	};
+}
+
+bool VKSingleQueueDeviceContext::BeginFrame()
+{
+	uint64_t timeoutNano = 10;
+	VkResult res{};
+
+	// Wait for the previous inflight render finish fences. Can't timeout, as we input a infinite timeout parameter.
+	res = vkWaitForFences(m_device, 1, &m_renderFinishedFences[m_inflightFrameIdx], VK_TRUE, timeoutNano);
+	if (res != VK_SUCCESS)
+	{
+		assert(res == VK_TIMEOUT);
+		return false;
+	}
+
+	// Acqure the swapchiain image.
+	VkResult acqSwapchainImageRes = vkAcquireNextImageKHR(m_device, m_swapchain, timeoutNano, m_imageAvailableSemaphores[m_inflightFrameIdx], VK_NULL_HANDLE, &m_currSwapchainImageIndex);
+	if (acqSwapchainImageRes != VK_SUCCESS) {
+		assert(acqSwapchainImageRes == VK_NOT_READY);		
+		return false;
+	}	
+
+	// So it's ready to begin the frame.
+	VKCall(vkResetFences(m_device, 1, &m_renderFinishedFences[m_inflightFrameIdx]));
+
+	return true;
+}
+
+void VKSingleQueueDeviceContext::EndFrame()
+{
+	m_inflightFrameIdx = (m_inflightFrameIdx + 1) % m_inflightFrameNum;
 }
 
 bool VKSingleQueueDeviceContext::DeviceWaitIdle()

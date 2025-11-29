@@ -159,6 +159,16 @@ private:
 	std::vector<VkFence> m_vkInflightFrameFences;
 };
 
+struct VKCommandPoolContext
+{
+	VkDevice Device{ VK_NULL_HANDLE };
+	uint32_t QueueFamilyIndex{ ~0u };
+	VkQueue Queue{ VK_NULL_HANDLE };
+	VkCommandPool CommandPool{ VK_NULL_HANDLE };
+};
+using VKCommandPoolContextUniquePtr = std::unique_ptr<VKCommandPoolContext>;
+using VKCommandPoolContextSharedPtr = std::shared_ptr<VKCommandPoolContext>;
+
 // VKSingleQueueDeviceContext
 // * Only use one queue, which can graphics, compute and transfer
 //	? The problem is that this depends on the physical device and the chosen queue index. So it's better to also include the picking of the physical device here ?
@@ -179,7 +189,10 @@ public:
 
 	void DestroySwapchain();
 
-	bool InitializeInflightContext(int inflightFrameNum = 2);
+	bool InitializeInflightContext(uint32_t inflightFrameNum = 2);
+
+	VKCommandPoolContext CreateGraphicsQueueCommandPool();
+	// VKCommandPoolContextSharedPtr CreateComputeQueueCommandPool();
 
 	// SDL_Window* GetWindow() const { return m_sdlWindow; }
 
@@ -192,7 +205,7 @@ public:
 	VkSurfaceKHR GetSurface() const { return m_surface; }
 	VkSurfaceFormatKHR GetSurfaceFormat() const { return m_surfaceFormat; }
 	VkSwapchainKHR GetSwapchain() const { return m_swapchain; }
-	size_t GetSwapchainImageNum() const { return m_swapchainImageViews.size(); }
+	size_t GetSwapchainImageNum() const { return m_swapchainImages.size(); }
 	std::span<const VkImageView> GetSwapchainImageViews() const { return m_swapchainImageViews; }
 	VkRenderPass GetSwapchainRenderPass() const { return m_swapchainRenderPass; }
 
@@ -200,6 +213,13 @@ public:
 	VkCommandPool GetCommandPool() const { return m_commandPool; }
 
 	int GetInflightFrameNum() const { return m_inflightFrameNum; }		
+
+	// If return false, can't begin the current frame.
+	bool BeginFrame();	
+	uint32_t GetInflightFrameIndex() const { return m_inflightFrameIdx; }
+	VkImage GetSwapchainImage() const { return m_swapchainImages[m_currSwapchainImageIndex]; }
+
+	void EndFrame();
 
 	bool DeviceWaitIdle();
 
@@ -221,12 +241,14 @@ private:
 	VkExtent2D m_swapchainExtent{ ~0u, ~0u };
 	VkSwapchainKHR m_swapchain{ VK_NULL_HANDLE };
 	VkRenderPass m_swapchainRenderPass{ VK_NULL_HANDLE };
+	std::vector<VkImage> m_swapchainImages;
+	uint32_t m_currSwapchainImageIndex{ ~0u };
 	std::vector<VkImageView> m_swapchainImageViews;
 	std::vector<VkFramebuffer> m_swapchainFramebuffers;
 
 	// Inflight context.
-	int m_inflightFrameNum{ 2 };
-	int m_inflightFrameIdx{ 0 };
+	uint32_t m_inflightFrameNum{ 2 };
+	uint32_t m_inflightFrameIdx{ 0 };
 	std::vector<VkSemaphore> m_imageAvailableSemaphores;
 	std::vector<VkSemaphore> m_renderFinishedSemaphores;
 	std::vector<VkFence> m_renderFinishedFences;

@@ -79,7 +79,7 @@ bool VKRTApplication::Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, c
 		return false;
 	}
 
-	// Initialize the inflight contexts.
+	// Initialize the inflight contexts.	
 	if (!m_context->InitializeInflightContext()) {
 		return false;
 	}
@@ -150,6 +150,14 @@ bool VKRTApplication::Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, c
 
 void VKRTApplication::RunOneFrame(double frameSeconds, double FPS)
 {
+	if (!m_context->BeginFrame()) {
+		return;
+	}
+
+	uint32_t inflightFrameIndex = m_context->GetInflightFrameIndex();
+	VkImage swapchainImage = m_context->GetSwapchainImage();
+
+
 	VkDevice vkDevice = m_context->GetDevice();
 	VkSwapchainKHR vkSwapchain = m_context->GetSwapchain();
 	std::span<const VkImageView> vkSwapchainImages = m_context->GetSwapchainImageViews();
@@ -167,24 +175,8 @@ void VKRTApplication::RunOneFrame(double frameSeconds, double FPS)
 	//ImGui::ShowAboutWindow();
 
 	// Do rendering.
-	{
-		if (vkWaitForFences(vkDevice, 1, &renderFinishedFences[inflightIdx], VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
-			return;
-		}
-
-		// Try to get the image to render to.
-		uint32_t imgIdx;
-		VkResult acqRes = vkAcquireNextImageKHR(vkDevice, vkSwapchain, 0, imageAvailableSemaphores[inflightIdx], VK_NULL_HANDLE, &imgIdx);
-		if (acqRes != VK_SUCCESS) {
-			return;
-		}
-		VkImage vkSwapchainImage = vkSwapchainImages[imgIdx];
-
-		//  Now we can begin to render.
-
-		// reset the renderFinishedFence.
-		VKCall(vkResetFences(vkDevice, 1, &renderFinishedFences[inflightIdx]));
-
+	// Just clear the backbuffer now.
+	{					
 		// Reset command buffer.
 		VkCommandBuffer vkCmdBuf = imageCmdBufs[inflightIdx];
 		VKCall(vkResetCommandBuffer(vkCmdBuf, 0));
@@ -303,8 +295,9 @@ void VKRTApplication::RunOneFrame(double frameSeconds, double FPS)
 		};
 		VKCall(vkQueuePresentKHR(vkQueue, &presentInfo));
 
-		inflightIdx = (inflightIdx + 1) % inflightFrameCnt;
 	}
+
+	m_context->EndFrame();
 }
 
 bool VKRTApplication::Shutdown()
