@@ -409,18 +409,7 @@ bool VKSingleQueueDeviceContext::InitializeDevice(std::span<const char*> layers,
 
 	// Get the DeviceQueue.
 	vkGetDeviceQueue(m_device, m_queueFamilyIdx, 0, &m_queue);
-	
-	// Create a VkQueueCommandPool.
-	VkCommandPoolCreateInfo vkCmdPoolCInfo{
-		.sType{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO},
-		.flags{VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT},
-		.queueFamilyIndex{m_queueFamilyIdx},
-	};
-	if (!VKSucceed(vkCreateCommandPool(m_device, &vkCmdPoolCInfo, nullptr, &m_commandPool))) {
-		LogError("Failed to create VkCommandPool.");
-		return false;
-	}
-	
+		
 	// Initialize VMA Allocator.
 
 
@@ -622,13 +611,13 @@ bool VKSingleQueueDeviceContext::InitializeInflightContext(uint32_t inflightFram
 	return true;
 }
 
-bool VKSingleQueueDeviceContext::CreateGraphicsQueueCommandPool(VKCommandPoolContextUniquePtr* cmdPoolCtx)
+bool VKSingleQueueDeviceContext::CreateGraphicsQueueCommandPool(VkCommandPoolCreateFlags flags, VKCommandPoolContextUniquePtr* cmdPoolCtx)
 {
 	assert(cmdPoolCtx != nullptr);
 
 	VkCommandPoolCreateInfo cmdPoolCInfo = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-		.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+		.flags = flags,
 		.queueFamilyIndex = m_queueFamilyIdx,
 	};
 
@@ -642,13 +631,14 @@ bool VKSingleQueueDeviceContext::CreateGraphicsQueueCommandPool(VKCommandPoolCon
 	return true;
 }
 
-bool VKSingleQueueDeviceContext::BeginFrame()
+bool VKSingleQueueDeviceContext::AdvanceFrame(InflightState* inflightFrameInfo)
 {
+	size_t nextInflightFrameIdx = (m_inflightFrameIdx + 1) % m_inflightFrameNum;
 	uint64_t timeoutNano = 10;
 	VkResult res{};
 
 	// Wait for the previous inflight render finish fences. Can't timeout, as we input a infinite timeout parameter.
-	res = vkWaitForFences(m_device, 1, &m_renderFinishedFences[m_inflightFrameIdx], VK_TRUE, timeoutNano);
+	res = vkWaitForFences(m_device, 1, &m_renderFinishedFences[nextInflightFrameIdx], VK_TRUE, timeoutNano);
 	if (res != VK_SUCCESS)
 	{
 		assert(res == VK_TIMEOUT);
@@ -656,19 +646,31 @@ bool VKSingleQueueDeviceContext::BeginFrame()
 	}
 
 	// Acqure the swapchiain image.
-	VkResult acqSwapchainImageRes = vkAcquireNextImageKHR(m_device, m_swapchain, timeoutNano, m_imageAvailableSemaphores[m_inflightFrameIdx], VK_NULL_HANDLE, &m_currSwapchainImageIndex);
+	VkResult acqSwapchainImageRes = vkAcquireNextImageKHR(m_device, m_swapchain, timeoutNano, m_imageAvailableSemaphores[nextInflightFrameIdx], VK_NULL_HANDLE, &m_currSwapchainImageIndex);
 	if (acqSwapchainImageRes != VK_SUCCESS) {
 		assert(acqSwapchainImageRes == VK_NOT_READY);		
 		return false;
 	}	
 
 	// So it's ready to begin the frame.
-	VKCall(vkResetFences(m_device, 1, &m_renderFinishedFences[m_inflightFrameIdx]));
+	VKCall(vkResetFences(m_device, 1, &m_renderFinishedFences[nextInflightFrameIdx]));
+
+	m_inflightFrameIdx = nextInflightFrameIdx;
+
+	*inflightFrameInfo = {
+		.SwapchainImageIndex{ m_currSwapchainImageIndex },
+		.SwapchainImage{ m_swapchainImages[m_currSwapchainImageIndex] },
+		.SwapchainFramebuffer{ m_swapchainFramebuffers[m_currSwapchainImageIndex] },
+		.InflightFrameIndex{ m_inflightFrameIdx },
+		.InflightImageAvailableSemaphore{ m_imageAvailableSemaphores[m_inflightFrameIdx] },
+		.InflightRenderFinishedSemaphore{ m_renderFinishedSemaphores[m_inflightFrameIdx] },
+		.InflightRenderFinishedFence{ m_renderFinishedFences[m_inflightFrameIdx] },
+	};
 
 	return true;
 }
 
-void VKSingleQueueDeviceContext::EndFrame(const std::span<VkCommandBuffer>& cmdBufs, bool present)
+void VKSingleQueueDeviceContext::EndFrame(const std::span<VkCommandBuffer>& cmdBufs)
 {
 	// Submit the command buffer.
 	VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
@@ -683,24 +685,25 @@ void VKSingleQueueDeviceContext::EndFrame(const std::span<VkCommandBuffer>& cmdB
 		.pSignalSemaphores = &m_renderFinishedSemaphores[m_inflightFrameIdx],
 	};
 	VKCall(vkQueueSubmit(m_queue, 1, &submitInfo, m_renderFinishedFences[m_inflightFrameIdx]));
+}
 
-	// Queue present.
-	if (present)
-	{
-		VkResult presentRes = VK_SUCCESS;
-		VkPresentInfoKHR presentInfo = {
-			.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &m_renderFinishedSemaphores[m_inflightFrameIdx],
-			.swapchainCount = 1,
-			.pSwapchains = &m_swapchain,
-			.pImageIndices = &m_currSwapchainImageIndex,
-			.pResults = &presentRes,
-		};
-		VKCall(vkQueuePresentKHR(m_queue, &presentInfo));
+bool VKSingleQueueDeviceContext::Present(const std::span<VkSemaphore>& waitSemaphores)
+{
+	VkResult presentRes = VK_SUCCESS;
+	VkPresentInfoKHR presentInfo = {
+		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+		.waitSemaphoreCount = (uint32_t)waitSemaphores.size()	,
+		.pWaitSemaphores = waitSemaphores.data(),
+		.swapchainCount = 1,
+		.pSwapchains = &m_swapchain,
+		.pImageIndices = &m_currSwapchainImageIndex,
+		.pResults = &presentRes,
+	};
+	if (!VKSucceed(vkQueuePresentKHR(m_queue, &presentInfo)) || !VKSucceed(presentRes)) {
+		return false;
 	}
 
-	m_inflightFrameIdx = (m_inflightFrameIdx + 1) % m_inflightFrameNum;
+	return true;
 }
 
 bool VKSingleQueueDeviceContext::DeviceWaitIdle()
@@ -719,11 +722,6 @@ VKSingleQueueDeviceContext::~VKSingleQueueDeviceContext()
 	VKDestroyFenceVector(m_device, m_renderFinishedFences, m_allocator);
 
 	DestroySwapchain();
-
-	if (m_commandPool != VK_NULL_HANDLE) 
-	{
-		vkDestroyCommandPool(m_device, m_commandPool, m_allocator);
-	}
 
 	if (m_swapchainRenderPass != VK_NULL_HANDLE)
 	{

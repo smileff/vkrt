@@ -213,9 +213,23 @@ using VKCommandPoolContextSharedPtr = std::shared_ptr<VKCommandPoolContext>;
 // * Only use one queue, which can graphics, compute and transfer
 //	? The problem is that this depends on the physical device and the chosen queue index. So it's better to also include the picking of the physical device here ?
 
+struct InflightState
+{
+	uint32_t SwapchainImageIndex{ ~0u };
+	VkImage SwapchainImage{ VK_NULL_HANDLE };
+	VkFramebuffer SwapchainFramebuffer{ VK_NULL_HANDLE };
+
+	size_t InflightFrameIndex{ size_t(-1)};
+	VkSemaphore InflightImageAvailableSemaphore{ VK_NULL_HANDLE };
+	VkSemaphore InflightRenderFinishedSemaphore{ VK_NULL_HANDLE };
+	VkFence InflightRenderFinishedFence{ VK_NULL_HANDLE };
+};
+
 class VKSingleQueueDeviceContext
 {
 public:
+
+	VKSingleQueueDeviceContext(VkInstance instance, VkPhysicalDevice& physicalDevice, VkDevice device, uint32_t queueFamilyIndex, VkQueue queue, uint32_t swapchainMinImageCount, size_t inflightFrameNumber)
 
 	VKSingleQueueDeviceContext(VkInstance inst, VkPhysicalDevice physDevice, uint32_t queueFamilyIdx);
 
@@ -231,10 +245,8 @@ public:
 
 	bool InitializeInflightContext(uint32_t inflightFrameNum = 2);
 
-	bool CreateGraphicsQueueCommandPool(VKCommandPoolContextUniquePtr* cmdPoolCtx);
-	// VKCommandPoolContextSharedPtr CreateComputeQueueCommandPool();
+	bool CreateGraphicsQueueCommandPool(VkCommandPoolCreateFlags flags, VKCommandPoolContextUniquePtr* cmdPoolCtx);
 
-	// SDL_Window* GetWindow() const { return m_sdlWindow; }
 
 	VkInstance GetInstance() const { return m_instance; }
 	VkPhysicalDevice GetPhysicalDevice() const { return m_physicalDevice; }
@@ -248,22 +260,18 @@ public:
 	size_t GetSwapchainImageNum() const { return m_swapchainImages.size(); }
 	std::span<const VkImageView> GetSwapchainImageViews() const { return m_swapchainImageViews; }
 	VkRenderPass GetSwapchainRenderPass() const { return m_swapchainRenderPass; }
-
-
-	VkCommandPool GetCommandPool() const { return m_commandPool; }
+	VkRect2D GetSwapchainRect() const { return VkRect2D{ {0,0}, m_swapchainExtent }; }
 
 	size_t GetInflightFrameNum() const { return m_inflightFrameNum; }		
 
 	// If return false, can't begin the current frame.
-	bool BeginFrame();	
-	size_t GetInflightFrameIndex() const { return m_inflightFrameIdx; }
-	VkImage GetSwapchainImage() const { return m_swapchainImages[m_currSwapchainImageIndex]; }
-	VkFramebuffer GetSwapchainFramebuffer() const { return m_swapchainFramebuffers[m_currSwapchainImageIndex]; }
-	VkRect2D GetSwapchainRect() const { return VkRect2D{ {0,0}, m_swapchainExtent }; }
+	bool AdvanceFrame(InflightState* inflightFrameInfo);
 
 	// bool GraphicsQueueSubmitAndPresent
 
-	void EndFrame(const std::span<VkCommandBuffer>& cmdBufs, bool present);
+	void EndFrame(const std::span<VkCommandBuffer>& cmdBufs);
+
+	bool Present(const std::span<VkSemaphore>& waitSemaphores);
 
 	bool DeviceWaitIdle();
 
@@ -296,8 +304,6 @@ private:
 	std::vector<VkSemaphore> m_imageAvailableSemaphores;
 	std::vector<VkSemaphore> m_renderFinishedSemaphores;
 	std::vector<VkFence> m_renderFinishedFences;
-
-	VkCommandPool m_commandPool{ VK_NULL_HANDLE };		// Should this be put here?
 
 	// Vma memory management.
 	//VmaAllocator m_VmaAllocator{ VK_NULL_HANDLE };

@@ -38,7 +38,9 @@ public:
 private:
 	std::unique_ptr<VKSingleQueueDeviceContext> m_context;
 	VKCommandPoolContextUniquePtr m_cmdPoolCtx;
-	std::vector<VkCommandBuffer> m_inflightCmdBufs;
+
+	static const size_t m_inflightFrameNum = 2;
+	std::array<VkCommandBuffer, m_inflightFrameNum> m_inflightCmdBufs{};
 };
 
 bool VKRTApplication::Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, const VkSurfaceKHR& vkSurf)
@@ -85,23 +87,15 @@ bool VKRTApplication::Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, c
 	}
 
 	// Create command pool.
-	if (!m_context->CreateGraphicsQueueCommandPool(&m_cmdPoolCtx)) {
+	if (!m_context->CreateGraphicsQueueCommandPool(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, &m_cmdPoolCtx)) {
 		return false;
 	}
 
 	// std::array<VkCommandBuffer, 3> cmdBufs;
-	size_t inflightFrameNum = m_context->GetInflightFrameNum();
-	m_inflightCmdBufs.resize(inflightFrameNum, VK_NULL_HANDLE);
-	if (!m_cmdPoolCtx->AllocateCommandBuffers(inflightFrameNum, m_inflightCmdBufs)) {
+	if (!m_cmdPoolCtx->AllocateCommandBuffers(m_inflightFrameNum, m_inflightCmdBufs)) {
 		return false;
 	}
 
-
-	// Allocate a command buffer for each swapchain image.
-
-
-	//uint32_t inflightFrameNum = m_context->GetInflightFrameNum();
-	// std::span<const VkImageView> swapchainImageViews = m_context->GetSwapchainImageViews();
 
 	// Initialize ImgUI
 	//// Initialize imgUI
@@ -149,17 +143,10 @@ bool VKRTApplication::Initialize(SDL_Window* sdlWin, const VkInstance& vkInst, c
 
 void VKRTApplication::RunOneFrame(double frameSeconds, double FPS)
 {
-	if (!m_context->BeginFrame()) {
+	InflightState inflight;
+	if (!m_context->AdvanceFrame(&inflight)) {
 		return;
 	}
-
-	size_t inflightFrameIndex = m_context->GetInflightFrameIndex();
-	VkImage swapchainImage = m_context->GetSwapchainImage();
-
-
-	VkDevice vkDevice = m_context->GetDevice();
-	VkSwapchainKHR vkSwapchain = m_context->GetSwapchain();
-	std::span<const VkImageView> vkSwapchainImages = m_context->GetSwapchainImageViews();
 
 	// ImGui handles events.
 
@@ -177,7 +164,7 @@ void VKRTApplication::RunOneFrame(double frameSeconds, double FPS)
 	// Just clear the backbuffer now.
 	// 				
 	// Reset command buffer.
-	VkCommandBuffer vkCmdBuf = m_inflightCmdBufs[inflightFrameIndex];
+	VkCommandBuffer vkCmdBuf = m_inflightCmdBufs[inflight.InflightFrameIndex];
 	VKCall(vkResetCommandBuffer(vkCmdBuf, 0));
 
 	// Begin the command buffer.
@@ -231,7 +218,7 @@ void VKRTApplication::RunOneFrame(double frameSeconds, double FPS)
 		.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = swapchainImage,
+		.image = inflight.SwapchainImage,
 		.subresourceRange = {
 			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 			.baseMipLevel = 0,
@@ -249,7 +236,7 @@ void VKRTApplication::RunOneFrame(double frameSeconds, double FPS)
 	VkRenderPassBeginInfo renderPassBeginInfo = {
 		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
 		.renderPass = m_context->GetSwapchainRenderPass(),
-		.framebuffer = m_context->GetSwapchainFramebuffer(),
+		.framebuffer = inflight.SwapchainFramebuffer,
 		.renderArea = m_context->GetSwapchainRect(),
 		.clearValueCount = 1,
 		.pClearValues = &clearValue,
@@ -265,8 +252,9 @@ void VKRTApplication::RunOneFrame(double frameSeconds, double FPS)
 	// End the command buffer.
 	VKCall(vkEndCommandBuffer(vkCmdBuf));
 
+	m_context->EndFrame(std::span<VkCommandBuffer>(&vkCmdBuf, 1));
 
-	m_context->EndFrame(std::span<VkCommandBuffer>(&vkCmdBuf, 1), true);
+	m_context->Present(std::span{ &inflight.InflightRenderFinishedSemaphore , 1 });
 }
 
 bool VKRTApplication::Shutdown()
