@@ -132,12 +132,9 @@ VkQueue VKDeviceContext::GetQueueFamilyQueue(uint32_t i, uint32_t queueIdx) cons
 
 // VKSwapchainContext
 
-VKSwapchainContext::VKSwapchainContext(const VKDeviceContext& vkDeviceContext, int swapchainImageNum, const VkAllocationCallbacks* vkAllocator)
-	: m_vkCtx(vkDeviceContext)
-	, m_vkAllocator(vkAllocator)
-	, m_swapchainImageNum(swapchainImageNum)
-{
-}
+VKSwapchainContext::VKSwapchainContext(VkDevice device, uint32_t queueFamilyIndex, VkQueue queue)
+	: m_device(device), m_queueFamilyIndex(queueFamilyIndex), m_queue(queue)
+{}
 
 VKSwapchainContext::~VKSwapchainContext()
 {
@@ -145,7 +142,7 @@ VKSwapchainContext::~VKSwapchainContext()
 		[this](VkFramebuffer& fb)
 		{
 			if (fb != VK_NULL_HANDLE) {
-				vkDestroyFramebuffer(m_vkCtx.GetDevice(), fb, m_vkAllocator);
+				vkDestroyFramebuffer(m_device, fb, m_vkAllocator);
 				fb = VK_NULL_HANDLE;
 			}
 		});
@@ -154,65 +151,67 @@ VKSwapchainContext::~VKSwapchainContext()
 		[this](VkImageView imageView)
 		{
 			if (imageView) {
-				vkDestroyImageView(m_vkCtx.GetDevice(), imageView, m_vkAllocator);
+				vkDestroyImageView(m_device, imageView, m_vkAllocator);
 				imageView = VK_NULL_HANDLE;
 			}
 		});
 
 	if (m_swapchainRenderPass != VK_NULL_HANDLE) {
-		vkDestroyRenderPass(m_vkCtx.GetDevice(), m_swapchainRenderPass, m_vkAllocator);
+		vkDestroyRenderPass(m_device, m_swapchainRenderPass, m_vkAllocator);
 		m_swapchainRenderPass = VK_NULL_HANDLE;
 	}
 
-	if (m_vkSwapchain != VK_NULL_HANDLE) {
-		vkDestroySwapchainKHR(m_vkCtx.GetDevice(), m_vkSwapchain, m_vkAllocator);
-		m_vkSwapchain = VK_NULL_HANDLE;
+	if (m_swapchain != VK_NULL_HANDLE) {
+		vkDestroySwapchainKHR(m_device, m_swapchain, m_vkAllocator);
+		m_swapchain = VK_NULL_HANDLE;
 	}
 }
 
-bool VKSwapchainContext::InitSwapchain(uint32_t queueFamilyIdx, VkSurfaceKHR vkSurf, VkSurfaceFormatKHR vkSurfaceFormat, uint32_t rtWidth, uint32_t rtHeight)
+bool VKSwapchainContext::InitSwapchain(VkSurfaceKHR surf, VkSurfaceFormatKHR surfFormat, VkExtent2D surfExt, uint32_t swapchainImageMinCount)
 {
-	m_vkSwapchainSurfaceFormat = vkSurfaceFormat;
+	m_surfaceFormat = surfFormat;
+	m_swapchainRect = VkRect2D{ {0,0}, surfExt };
 
+	// Create the swapchain.
 	VkSwapchainCreateInfoKHR vkSwapchainCInfo = {
 			.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-			.surface = vkSurf,
+			.surface = surf,
 			.minImageCount = (uint32_t)m_swapchainImageNum,
-			.imageFormat = m_vkSwapchainSurfaceFormat.format,
-			.imageColorSpace = m_vkSwapchainSurfaceFormat.colorSpace,
-			.imageExtent = VkExtent2D{ (uint32_t)rtWidth, (uint32_t)rtHeight },
+			.imageFormat = m_surfaceFormat.format,
+			.imageColorSpace = m_surfaceFormat.colorSpace,
+			.imageExtent = surfExt,
 			.imageArrayLayers = 1,
 			.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
 			.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
 			.queueFamilyIndexCount = 1,
-			.pQueueFamilyIndices = &queueFamilyIdx,
+			.pQueueFamilyIndices = &m_queueFamilyIndex,
 			.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
 			.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
 			.presentMode = VK_PRESENT_MODE_FIFO_KHR,
 			.clipped = VK_TRUE,
 	};
-	if (!VKSucceed(vkCreateSwapchainKHR(m_vkCtx.GetDevice(), &vkSwapchainCInfo, m_vkAllocator, &m_vkSwapchain))) {
+	if (!VKSucceed(vkCreateSwapchainKHR(m_device, &vkSwapchainCInfo, m_vkAllocator, &m_swapchain))) {
 		return false;
 	}
 
-	m_swapchainRect = VkRect2D{ {0, 0}, {rtWidth, rtHeight} };
+	// Obtain images from the swapchain.
+	if (!VKSucceed(vkGetSwapchainImagesKHR(m_device, m_swapchain, &m_swapchainImageNum, nullptr))) {
+		return false;
+	}
+	m_swapchainImages.resize(m_swapchainImageNum);
+	if (!VKSucceed(vkGetSwapchainImagesKHR(m_device, m_swapchain, &m_swapchainImageNum, m_swapchainImages.data()))) {
+		return false;
+	}
 
 	// And create image view for each image in swapchain.
-	uint32_t swapchainImageNum;
-	VKCall(vkGetSwapchainImagesKHR(m_vkCtx.GetDevice(), m_vkSwapchain, &swapchainImageNum, nullptr));
-	std::vector<VkImage> swapchainImages(swapchainImageNum);
-	VKCall(vkGetSwapchainImagesKHR(m_vkCtx.GetDevice(), m_vkSwapchain, &swapchainImageNum, swapchainImages.data()));
-
-	assert(swapchainImageNum == m_swapchainImageNum);
-
 	assert(m_swapchainImageViews.empty());
-	m_swapchainImageViews.resize(swapchainImageNum);
-	for (int i = 0; i < (int)swapchainImageNum; ++i) {
+	m_swapchainImageViews.resize(m_swapchainImageNum);
+	for (int i = 0; i < (int)m_swapchainImageNum; ++i) {
 		VkImageViewCreateInfo imageViewCInfo = {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-			.image = swapchainImages[i],
+			.image = m_swapchainImages[i],
 			.viewType = VK_IMAGE_VIEW_TYPE_2D,
-			.format = m_vkSwapchainSurfaceFormat.format,
+			.format = m_surfaceFormat.format,
 			.components = VkComponentMapping {},
 			.subresourceRange = VkImageSubresourceRange {
 				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -222,80 +221,48 @@ bool VKSwapchainContext::InitSwapchain(uint32_t queueFamilyIdx, VkSurfaceKHR vkS
 				.layerCount = 1,
 			},
 		};
-		VKCall(vkCreateImageView(m_vkCtx.GetDevice(), &imageViewCInfo, m_vkAllocator, &m_swapchainImageViews[i]));
-	}
-
-	// Create render pass for the swapchain.
-	{
-		// Need attachment descriptions, subpass descriptions and subpass denpendencies.
-		VkAttachmentDescription attachmentDesc = {
-			.format = m_vkSwapchainSurfaceFormat.format,
-			.samples = VK_SAMPLE_COUNT_1_BIT,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-			.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-		};
-
-
-		VkAttachmentReference colorRef = {
-			.attachment = 0,
-			.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-		};
-
-		VkSubpassDescription subpassDesc = {
-			.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
-			.colorAttachmentCount = 1,
-			.pColorAttachments = &colorRef,
-		};
-
-		VkSubpassDependency subpassDep = {
-			.srcSubpass = VK_SUBPASS_EXTERNAL,
-			.dstSubpass = 0,
-			.srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-			.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-			.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
-			.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-		};
-
-		VkRenderPassCreateInfo renderPassCInfo = {
-			.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-			.attachmentCount = 1,
-			.pAttachments = &attachmentDesc,
-			.subpassCount = 1,
-			.pSubpasses = &subpassDesc,
-			.dependencyCount = 1,
-			.pDependencies = &subpassDep,
-		};
-
-		if (!VKSucceed(vkCreateRenderPass(m_vkCtx.GetDevice(), &renderPassCInfo, m_vkAllocator, &m_swapchainRenderPass))) {
+		if (!VKSucceed(vkCreateImageView(m_device, &imageViewCInfo, m_vkAllocator, &m_swapchainImageViews[i]))) {
 			return false;
 		}
 	}
 
 	// Create framebuffer for each swapchain image.
 	m_swapchainFramebuffers.resize(m_swapchainImageNum);
-	for (int i = 0; i < m_swapchainImageNum; ++i) {
+	for (uint32_t i = 0; i < m_swapchainImageNum; ++i) {
 		VkFramebufferCreateInfo framebufferCInfo = {
 			.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
 			.renderPass = m_swapchainRenderPass,
 			.attachmentCount = 1,
 			.pAttachments = &m_swapchainImageViews[i],
-			.width = rtWidth,
-			.height = rtHeight,
+			.width = m_swapchainRect.extent.width,
+			.height = m_swapchainRect.extent.height,
 			.layers = 1,
 		};
-		vkCreateFramebuffer(m_vkCtx.GetDevice(), &framebufferCInfo, m_vkAllocator, &m_swapchainFramebuffers[i]);
+		vkCreateFramebuffer(m_device, &framebufferCInfo, m_vkAllocator, &m_swapchainFramebuffers[i]);
 	}
 
 	return true;
 }
 
-bool VKSwapchainContext::AcquireNextSwapchainImage(VkSemaphore imageAvailableSemaphore, uint64_t timeout /*= UINT64_MAX*/)
+bool VKSwapchainContext::AcquireNextImage(VkSemaphore imageAvailableSemaphore, uint64_t timeout)
 {
-	VkResult res = vkAcquireNextImageKHR(m_vkCtx.GetDevice(), m_vkSwapchain, timeout, imageAvailableSemaphore, VK_NULL_HANDLE, &m_swapchainImageIdx);
+	VkResult res = vkAcquireNextImageKHR(m_device, m_swapchain, timeout, imageAvailableSemaphore, VK_NULL_HANDLE, &m_currSwapchainImageIndex);
+
+	switch (res)
+	{
+	case VK_NOT_READY:
+		return true;
+	case VK_SUCCESS:
+		return true;
+	case VK_SUBOPTIMAL_KHR:
+		return true;
+	case VK_TIMEOUT:
+		return false;
+	case VK_ERROR_OUT_OF_DATE_KHR:
+		return true;
+	default:
+		return false;
+	}
 
 	if (res == VK_SUCCESS) {
 		return true;
@@ -304,6 +271,27 @@ bool VKSwapchainContext::AcquireNextSwapchainImage(VkSemaphore imageAvailableSem
 		return false;
 	}
 }
+
+bool VKSwapchainContext::Present(const std::span<VkSemaphore>& waitSemaphores)
+{
+	VkResult presentRes = VK_SUCCESS;
+	VkPresentInfoKHR presentInfo = {
+		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+		.waitSemaphoreCount = (uint32_t)waitSemaphores.size(),
+		.pWaitSemaphores = waitSemaphores.data(),
+		.swapchainCount = 1,
+		.pSwapchains = &m_swapchain,
+		.pImageIndices = &m_currSwapchainImageIndex,
+		.pResults = &presentRes,
+	};
+	if (!VKSucceed(vkQueuePresentKHR(m_queue, &presentInfo)) || !VKSucceed(presentRes)) {
+		return false;
+	}
+
+	return true;
+}
+
+// VKInflightContext
 
 VKInflightContext::VKInflightContext(const VKDeviceContext& vkDeviceContext, int inflightFrameNum, const VkAllocationCallbacks* vkAllocator)
 	: m_vkCtx(vkDeviceContext)
@@ -732,4 +720,269 @@ VKSingleQueueDeviceContext::~VKSingleQueueDeviceContext()
 	{
 		vkDestroyDevice(m_device, m_allocator);
 	}
+}
+
+// RealtimeRenderingContext --------------------------------------------------------------------------------------------------------------
+
+VKRealtimeRenderingContext::VKRealtimeRenderingContext(VkInstance instance, VkPhysicalDevice& physicalDevice, VkDevice device, uint32_t queueFamilyIndex, VkQueue queue) : m_instance(instance)
+, m_physicalDevice(physicalDevice)
+, m_device(device)
+, m_queueFamilyIdx(queueFamilyIndex)
+, m_queue(queue)
+{
+}
+
+bool VKRealtimeRenderingContext::InitializeSwapchainContext(VkSurfaceKHR surf, const VkSurfaceFormatKHR& surfFmt, const VkExtent2D& swapchainExtent, uint32_t swapchainMinImageCount /*= 3*/)
+{
+	assert(surf != VK_NULL_HANDLE);
+	m_surface = surf;
+	m_surfaceFormat = surfFmt;
+	m_swapchainExtent = swapchainExtent;
+
+	assert(m_swapchain == VK_NULL_HANDLE);
+	assert(m_swapchainImageViews.empty());
+
+	// Create swapchain.
+	VkSwapchainCreateInfoKHR vkSwapchainCInfo{
+		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+		.surface = m_surface,
+		.minImageCount = swapchainMinImageCount,
+		.imageFormat = m_surfaceFormat.format,
+		.imageColorSpace = m_surfaceFormat.colorSpace,
+		.imageExtent = m_swapchainExtent,
+		.imageArrayLayers = 1,
+		.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+		.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = 1,
+		.pQueueFamilyIndices = &m_queueFamilyIdx,
+		.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+		.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+		.presentMode = VK_PRESENT_MODE_FIFO_KHR,
+		.clipped = VK_FALSE,	// Intended false, to measure actual performance.
+		.oldSwapchain = VK_NULL_HANDLE,
+	};
+	if (!VKSucceed(vkCreateSwapchainKHR(m_device, &vkSwapchainCInfo, nullptr, &m_swapchain))) {
+		LogError("Failed to create VkSwapchain.");
+		return false;
+	}
+
+	// Create image view for each image in swapchain.
+	uint32_t swapchainImageNum{ ~0u };
+	if (!VKSucceed(vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageNum, nullptr))) {
+		LogError("Failed to get swapchain image count.");
+		return false;
+	}
+	m_swapchainImages.resize(swapchainImageNum, VK_NULL_HANDLE);
+	if (!VKSucceed(vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageNum, m_swapchainImages.data()))) {
+		LogError("Failed to get swapchain images.");
+		return false;
+	}
+
+	// Create an VKImageView for each swapchain image.
+	m_swapchainImageViews.resize(swapchainImageNum);
+	for (uint32_t swapchainImageIdx = 0; swapchainImageIdx < swapchainImageNum; ++swapchainImageIdx)
+	{
+		VkImageViewCreateInfo imageViewCInfo{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.image = m_swapchainImages[swapchainImageIdx],
+			.viewType = VK_IMAGE_VIEW_TYPE_2D,
+			.format = m_surfaceFormat.format,
+			.components = VkComponentMapping{},
+			.subresourceRange = VkImageSubresourceRange{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1,
+			},
+		};
+		if (!VKSucceed(vkCreateImageView(m_device, &imageViewCInfo, nullptr, &m_swapchainImageViews[swapchainImageIdx]))) {
+			return false;
+		}
+	}
+
+	// Create the VkRenderPass draw into the swapchain images.
+	{
+		RuntimeCheckError(m_swapchainRenderPass == VK_NULL_HANDLE);
+
+		VkAttachmentDescription colorAttachment{
+			.flags{0},
+			.format{m_surfaceFormat.format},
+			.samples{VK_SAMPLE_COUNT_1_BIT},
+			.loadOp{VK_ATTACHMENT_LOAD_OP_CLEAR},
+			.storeOp{VK_ATTACHMENT_STORE_OP_STORE},
+			.stencilLoadOp{VK_ATTACHMENT_LOAD_OP_DONT_CARE},
+			.stencilStoreOp{VK_ATTACHMENT_STORE_OP_DONT_CARE},
+			.initialLayout{VK_IMAGE_LAYOUT_UNDEFINED},
+			.finalLayout{VK_IMAGE_LAYOUT_PRESENT_SRC_KHR},
+		};
+		VkAttachmentReference colorAttachmentRef = {
+			.attachment{0},
+			.layout{VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}
+		};
+		colorAttachmentRef.attachment = 0;
+		colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+		// Only one sub pass.
+		VkSubpassDescription subpass = {};
+		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		subpass.colorAttachmentCount = 1;
+		subpass.pColorAttachments = &colorAttachmentRef;
+
+		VkSubpassDependency dependency = {};
+		dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+		dependency.dstSubpass = 0;
+		dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.srcAccessMask = 0;
+		dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+		// Create the back buffer pass.
+		VkRenderPassCreateInfo renderPassCInfo = {};
+		renderPassCInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+		renderPassCInfo.attachmentCount = 1;
+		renderPassCInfo.pAttachments = &colorAttachment;
+		renderPassCInfo.subpassCount = 1;
+		renderPassCInfo.pSubpasses = &subpass;
+		renderPassCInfo.dependencyCount = 1;
+		renderPassCInfo.pDependencies = &dependency;
+		if (!VKSucceed(vkCreateRenderPass(m_device, &renderPassCInfo, nullptr, &m_swapchainRenderPass))) {
+			return false;
+		}
+	}
+
+	// Create the swapchain framebuffers.	
+	size_t swapchainFramebufferNum = m_swapchainImageViews.size();
+	m_swapchainFramebuffers.resize(swapchainFramebufferNum);
+	for (uint32_t i = 0; i < swapchainFramebufferNum; ++i) {
+		VkFramebufferCreateInfo framebufferCInfo = {
+			.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+			.renderPass = m_swapchainRenderPass,
+			.attachmentCount = 1,
+			.pAttachments = &m_swapchainImageViews[i],
+			.width = m_swapchainExtent.width,
+			.height = m_swapchainExtent.height,
+			.layers = 1,
+		};
+		if (!VKSucceed(vkCreateFramebuffer(m_device, &framebufferCInfo, nullptr, &m_swapchainFramebuffers[i]))) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool VKRealtimeRenderingContext::InitializeInflightContext(uint32_t inflightFrameNum /*= 2*/)
+{
+	// Check that all synchoronization objects should not be initialized.
+	RuntimeCheckError(m_imageAvailableSemaphores.empty());
+	RuntimeCheckError(m_renderFinishedSemaphores.empty());
+	RuntimeCheckError(m_renderFinishedFences.empty());
+
+	m_inflightFrameNum = inflightFrameNum;
+
+	// Create inflight semaphores and fences.
+	m_imageAvailableSemaphores.resize(m_inflightFrameNum);
+	m_renderFinishedSemaphores.resize(m_inflightFrameNum);
+	m_renderFinishedFences.resize(m_inflightFrameNum);
+	for (uint32_t i = 0; i < m_inflightFrameNum; ++i)
+	{
+		VkSemaphoreCreateInfo semaphoreCInfo{
+			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+		};
+
+		if (!VKSucceed(vkCreateSemaphore(m_device, &semaphoreCInfo, m_allocator, &m_imageAvailableSemaphores[i]))) {
+			return false;
+		}
+
+		if (!VKSucceed(vkCreateSemaphore(m_device, &semaphoreCInfo, m_allocator, &m_renderFinishedSemaphores[i]))) {
+			return false;
+		}
+
+		VkFenceCreateInfo fenceCInfo{
+			.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+			.flags = VK_FENCE_CREATE_SIGNALED_BIT,
+		};
+
+		if (!VKSucceed(vkCreateFence(m_device, &fenceCInfo, m_allocator, &m_renderFinishedFences[i]))) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool VKRealtimeRenderingContext::AdvanceFrame(InflightState* inflightFrameInfo)
+{
+	size_t nextInflightFrameIdx = (m_inflightFrameIdx + 1) % m_inflightFrameNum;
+	uint64_t timeoutNano = 10;
+	VkResult res{};
+
+	// Wait for the previous inflight render finish fences. Can't timeout, as we input a infinite timeout parameter.
+	res = vkWaitForFences(m_device, 1, &m_renderFinishedFences[nextInflightFrameIdx], VK_TRUE, timeoutNano);
+	if (res != VK_SUCCESS)
+	{
+		assert(res == VK_TIMEOUT);
+		return false;
+	}
+
+	// Acqure the swapchiain image.
+	VkResult acqSwapchainImageRes = vkAcquireNextImageKHR(m_device, m_swapchain, timeoutNano, m_imageAvailableSemaphores[nextInflightFrameIdx], VK_NULL_HANDLE, &m_currSwapchainImageIndex);
+	if (acqSwapchainImageRes != VK_SUCCESS) {
+		assert(acqSwapchainImageRes == VK_NOT_READY);
+		return false;
+	}
+
+	// So it's ready to begin the frame.
+	VKCall(vkResetFences(m_device, 1, &m_renderFinishedFences[nextInflightFrameIdx]));
+
+	m_inflightFrameIdx = nextInflightFrameIdx;
+
+	*inflightFrameInfo = {
+		.SwapchainImageIndex{ m_currSwapchainImageIndex },
+		.SwapchainImage{ m_swapchainImages[m_currSwapchainImageIndex] },
+		.SwapchainFramebuffer{ m_swapchainFramebuffers[m_currSwapchainImageIndex] },
+		.InflightFrameIndex{ m_inflightFrameIdx },
+		.InflightImageAvailableSemaphore{ m_imageAvailableSemaphores[m_inflightFrameIdx] },
+		.InflightRenderFinishedSemaphore{ m_renderFinishedSemaphores[m_inflightFrameIdx] },
+		.InflightRenderFinishedFence{ m_renderFinishedFences[m_inflightFrameIdx] },
+	};
+
+	return true;
+}
+
+void VKRealtimeRenderingContext::EndFrame(const std::span<VkCommandBuffer>& cmdBufs)
+{
+	// Submit the command buffer.
+	VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+	VkSubmitInfo submitInfo = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &m_imageAvailableSemaphores[m_inflightFrameIdx],
+		.pWaitDstStageMask = waitStages,
+		.commandBufferCount = (uint32_t)cmdBufs.size(),
+		.pCommandBuffers = cmdBufs.data(),
+		.signalSemaphoreCount = 1,
+		.pSignalSemaphores = &m_renderFinishedSemaphores[m_inflightFrameIdx],
+	};
+	VKCall(vkQueueSubmit(m_queue, 1, &submitInfo, m_renderFinishedFences[m_inflightFrameIdx]));
+}
+
+bool VKRealtimeRenderingContext::Present(const std::span<VkSemaphore>& waitSemaphores)
+{
+	VkResult presentRes = VK_SUCCESS;
+	VkPresentInfoKHR presentInfo = {
+		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+		.waitSemaphoreCount = (uint32_t)waitSemaphores.size()	,
+		.pWaitSemaphores = waitSemaphores.data(),
+		.swapchainCount = 1,
+		.pSwapchains = &m_swapchain,
+		.pImageIndices = &m_currSwapchainImageIndex,
+		.pResults = &presentRes,
+	};
+	if (!VKSucceed(vkQueuePresentKHR(m_queue, &presentInfo)) || !VKSucceed(presentRes)) {
+		return false;
+	}
+
+	return true;
 }

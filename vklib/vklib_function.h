@@ -101,6 +101,12 @@ bool VKCreateDevice(
 	const VkAllocationCallbacks* vkAllocator,
 	VkDevice* vkDeviceResult);
 
+bool VKCreateSwapchainRenderPass(
+	VkDevice device,
+	VkFormat surfaceFormat,
+	VkAllocationCallbacks* allocator,
+	VkRenderPass* renderPass);
+
 // Shader & pipeline.
 
 extern const VkPipelineVertexInputStateCreateInfo g_VertexInputStateCreateInfo_NoVertexInput;

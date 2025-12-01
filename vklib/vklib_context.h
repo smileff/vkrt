@@ -97,34 +97,40 @@ class VKSwapchainContext
 {
 public:
 
-	VKSwapchainContext(const class VKDeviceContext& vkDeviceContext, int swapchainImageNum = 3, const VkAllocationCallbacks* vkAllocator = nullptr);
+	VKSwapchainContext(VkDevice device, uint32_t queueFamilyIndex, VkQueue queue);
 	virtual ~VKSwapchainContext();
 
-	bool InitSwapchain(uint32_t queueFamilyIdx, VkSurfaceKHR vkSurf, VkSurfaceFormatKHR vkSurfaceFormat, uint32_t rtWidth, uint32_t rtHeight);
+	bool InitSwapchain(VkSurfaceKHR surf, VkSurfaceFormatKHR surfFormat, VkExtent2D surfExtent, VkRenderPass swapchainRenderPass, uint32_t swapchainImageMinCount = 3);
 
-	const VkSwapchainKHR& GetSwapchain() const { return m_vkSwapchain; }
-	const VkRenderPass& GetSwapchainRenderPass() const { return m_swapchainRenderPass; }
+	const VkSwapchainKHR& GetSwapchain() const { return m_swapchain; }
+	uint32_t GetSwapchainImageNum() const { return m_swapchainImageNum; }
 	const VkRect2D& GetSwapchainRect() const { return m_swapchainRect; }
 
 	// Render a frame.
-	uint32_t GetSwapchainImageNum() const { return m_swapchainImageNum; }
-	const uint32_t& GetSwapchainImageIdx() const { return m_swapchainImageIdx; }
+	bool AcquireNextImage(VkSemaphore imageAvailableSemaphore, uint64_t timeout);
+	bool Present(const std::span<VkSemaphore>& waitSemaphores);
 
-	bool AcquireNextSwapchainImage(VkSemaphore imageAvailableSemaphore, uint64_t timeout = UINT64_MAX);
+	const VkFramebuffer& GetSwapchainFramebuffer() const { return m_swapchainFramebuffers[m_currSwapchainImageIndex]; }
 
-	const VkFramebuffer& GetSwapchainFramebuffer() const { return m_swapchainFramebuffers[m_swapchainImageIdx]; }
 
 private:
-	const class VKDeviceContext& m_vkCtx;
+
 	const VkAllocationCallbacks* m_vkAllocator = nullptr;
-	const int m_swapchainImageNum;
-	uint32_t m_swapchainImageIdx = (uint32_t)-1;
-	VkSurfaceFormatKHR m_vkSwapchainSurfaceFormat = {};
-	VkSwapchainKHR m_vkSwapchain = VK_NULL_HANDLE;
-	VkRenderPass m_swapchainRenderPass = VK_NULL_HANDLE;
+
+	VkDevice m_device{ VK_NULL_HANDLE };
+	uint32_t m_queueFamilyIndex{ ~0u };
+	VkQueue m_queue{ VK_NULL_HANDLE };
+
+	VkSurfaceFormatKHR m_surfaceFormat{};
+
+	uint32_t m_swapchainImageNum;
+	uint32_t m_currSwapchainImageIndex{ ~0u };
+
+	VkSwapchainKHR m_swapchain{ VK_NULL_HANDLE };
+	std::vector<VkImage> m_swapchainImages;
 	std::vector<VkImageView> m_swapchainImageViews;
 	std::vector<VkFramebuffer> m_swapchainFramebuffers;
-	VkRect2D m_swapchainRect = {};
+	VkRect2D m_swapchainRect{};
 };
 
 
@@ -229,7 +235,7 @@ class VKSingleQueueDeviceContext
 {
 public:
 
-	VKSingleQueueDeviceContext(VkInstance instance, VkPhysicalDevice& physicalDevice, VkDevice device, uint32_t queueFamilyIndex, VkQueue queue, uint32_t swapchainMinImageCount, size_t inflightFrameNumber)
+	VKSingleQueueDeviceContext(VkInstance instance, VkPhysicalDevice& physicalDevice, VkDevice device, uint32_t queueFamilyIndex, VkQueue queue, uint32_t swapchainMinImageCount, size_t inflightFrameNumber);
 
 	VKSingleQueueDeviceContext(VkInstance inst, VkPhysicalDevice physDevice, uint32_t queueFamilyIdx);
 
@@ -307,6 +313,61 @@ private:
 
 	// Vma memory management.
 	//VmaAllocator m_VmaAllocator{ VK_NULL_HANDLE };
+};
+
+
+class VKRealtimeRenderingContext
+{
+public:
+
+	VKRealtimeRenderingContext(VkInstance instance, VkPhysicalDevice& physicalDevice, VkDevice device, uint32_t queueFamilyIndex, VkQueue queue);
+
+	// Initialize context for realtime rendering, e.g. swapchain, semaphores, fences.
+	bool InitializeSwapchainContext(VkSurfaceKHR surf, const VkSurfaceFormatKHR& surfFmt, const VkExtent2D& swapchainExtent, uint32_t swapchainMinImageCount = 3);
+
+	void DestroySwapchain();
+
+	bool InitializeInflightContext(uint32_t inflightFrameNum = 2);
+
+	// If return false, can't begin the current frame.
+	bool AdvanceFrame(InflightState* inflightFrameInfo);
+
+
+	void EndFrame(const std::span<VkCommandBuffer>& cmdBufs);
+
+	bool Present(const std::span<VkSemaphore>& waitSemaphores);
+
+	bool DeviceWaitIdle();
+
+	~VKRealtimeRenderingContext();
+
+private:
+	VkAllocationCallbacks* m_allocator{ nullptr };
+
+	// Device context.
+	VkInstance m_instance{ VK_NULL_HANDLE };
+	VkPhysicalDevice m_physicalDevice{ VK_NULL_HANDLE };
+	uint32_t m_queueFamilyIdx{ ~0u };
+	VkDevice m_device{ VK_NULL_HANDLE };
+	VkQueue m_queue{ VK_NULL_HANDLE };
+
+	// Swapchain context.	
+	VkSurfaceKHR m_surface{ VK_NULL_HANDLE };
+	VkSurfaceFormatKHR m_surfaceFormat{};
+	VkExtent2D m_swapchainExtent{ ~0u, ~0u };
+	VkSwapchainKHR m_swapchain{ VK_NULL_HANDLE };
+	VkRenderPass m_swapchainRenderPass{ VK_NULL_HANDLE };
+	std::vector<VkImage> m_swapchainImages;
+	uint32_t m_currSwapchainImageIndex{ ~0u };
+	std::vector<VkImageView> m_swapchainImageViews;
+	std::vector<VkFramebuffer> m_swapchainFramebuffers;
+
+	// Inflight context.
+	size_t m_inflightFrameNum{ 2 };
+	size_t m_inflightFrameIdx{ 0 };
+	std::vector<VkSemaphore> m_imageAvailableSemaphores;
+	std::vector<VkSemaphore> m_renderFinishedSemaphores;
+	std::vector<VkFence> m_renderFinishedFences;
 };
 
 #endif

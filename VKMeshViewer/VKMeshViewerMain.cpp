@@ -471,7 +471,7 @@ void VKMeshViewerApp::RunOneFrame(double frameSeconds, double FPS)
 	uint32_t inflightFrameIdx = m_inflightContext->GetInflightFrameIdx();
 
 	// Get the target image from the swapchain.
-	m_swapchainContext->AcquireNextSwapchainImage(m_inflightContext->GetImageAvailableSemaphore(), UINT64_MAX);
+	m_swapchainContext->AcquireNextImage(m_inflightContext->GetImageAvailableSemaphore(), UINT64_MAX);
 
 	// ImGui render.
 	ImGuiBeginFrame();
@@ -559,15 +559,8 @@ void VKMeshViewerApp::RunOneFrame(double frameSeconds, double FPS)
 	VKCall(vkQueueSubmit(m_vkQueue, 1, &submitInfo, m_inflightContext->GetInflightFrameFence()));
 
 	// Present.
-	VkPresentInfoKHR presentInfo = {
-		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = &m_inflightContext->GetRenderFinishedSemaphore(),
-		.swapchainCount = 1,
-		.pSwapchains = &m_swapchainContext->GetSwapchain(),
-		.pImageIndices = &m_swapchainContext->GetSwapchainImageIdx(),
-	};
-	vkQueuePresentKHR(m_vkQueue, &presentInfo);
+	VkSemaphore renderFinishedSemaphore = m_inflightContext->GetRenderFinishedSemaphore();
+	m_swapchainContext->Present({ &renderFinishedSemaphore, 1 });
 
 	m_inflightContext->NextFrame();
 }
