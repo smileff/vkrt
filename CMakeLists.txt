@@ -13,7 +13,6 @@ add_subdirectory(cpu-rt)
 add_subdirectory(vklib)
 add_subdirectory(vkrt)
 # add_subdirectory(VKInitTest)
-add_subdirectory(VKMeshViewer)
 
 # Add documentation files to the IDE view.
 set(PROJECT_DOCS_DIR "${CMAKE_SOURCE_DIR}/docs")
